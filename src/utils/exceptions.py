@@ -1,280 +1,409 @@
 """
-МОДУЛЬ ИСКЛЮЧЕНИЙ И ОШИБОК
-==========================
+СИСТЕМА ИСКЛЮЧЕНИЙ ПРИЛОЖЕНИЯ
+==============================
 
-Кастомные исключения для различных сценариев приложения.
-Обеспечивают точную диагностику ошибок и корректную обработку.
+Иерархия кастомных исключений с централизованным управлением сообщениями.
+Разделение по категориям для точной диагностики ошибок.
 """
 
+from utils.messages import Messages
 from utils.logger import get_logger
 
 logger = get_logger('exceptions')
 
 
-class AppBaseException(Exception):
-    """Базовое исключение приложения с логированием."""
+# ============================================================================
+# БАЗОВЫЕ КЛАССЫ ИСКЛЮЧЕНИЙ
+# ============================================================================
 
-    def __init__(self, message, user_message=None, log_level='error'):
+class AppException(Exception):
+    """
+    Базовое исключение приложения.
+
+    Содержит техническое сообщение для логирования и
+    пользовательское сообщение для отображения.
+    """
+
+    def __init__(self, tech_message, user_message=None, log_level='error',
+                 context=None, details=None):
         """
         Инициализация исключения.
 
-        Параметры:
-        ----------
-        message : str
-            Техническое сообщение для логирования
-        user_message : str or None
-            Сообщение для пользователя (если None, используется message)
-        log_level : str
-            Уровень логирования ('debug', 'info', 'warning', 'error', 'critical')
+        Args:
+            tech_message: Техническое сообщение для логирования
+            user_message: Сообщение для пользователя
+            log_level: Уровень логирования
+            context: Контекст возникновения ошибки
+            details: Детали ошибки
         """
-        self.message = message
-        self.user_message = user_message or message
+        self.tech_message = tech_message
+        self.user_message = user_message or tech_message
         self.log_level = log_level.lower()
+        self.context = context
+        self.details = details
 
-        # Логируем исключение при создании
+        # Формируем полное сообщение
+        full_message = tech_message
+        if context:
+            full_message = f"[{context}] {full_message}"
+        if details:
+            full_message += f" (детали: {details})"
+
+        super().__init__(full_message)
+
+        # Автоматическое логирование
         self._log_exception()
 
-        super().__init__(self.message)
-
     def _log_exception(self):
-        """Логирование исключения при его создании."""
+        """Логирование исключения при создании."""
         log_method = getattr(logger, self.log_level, logger.error)
-        log_method(f"СОЗДАНО ИСКЛЮЧЕНИЕ {self.__class__.__name__}: {self.message}")
+        log_method(f"ИСКЛЮЧЕНИЕ {self.__class__.__name__}: {self.tech_message}")
+
+    def __str__(self):
+        """Строковое представление для пользователя."""
+        return self.user_message
+
+    def to_dict(self):
+        """Представление исключения в виде словаря для логирования."""
+        return {
+            'type': self.__class__.__name__,
+            'tech_message': self.tech_message,
+            'user_message': self.user_message,
+            'context': self.context,
+            'details': self.details,
+            'log_level': self.log_level
+        }
 
 
 # ============================================================================
 # ИСКЛЮЧЕНИЯ ВАЛИДАЦИИ
 # ============================================================================
 
-class ValidationError(AppBaseException):
+class ValidationException(AppException):
     """Базовое исключение для ошибок валидации."""
 
-    def __init__(self, message, field=None, value=None, user_message=None):
-        """
-        Инициализация ошибки валидации.
-
-        Параметры:
-        ----------
-        message : str
-            Техническое сообщение об ошибке
-        field : str or None
-            Поле, в котором произошла ошибка
-        value : any or None
-            Значение, вызвавшее ошибку
-        user_message : str or None
-            Сообщение для пользователя
-        """
+    def __init__(self, field=None, value=None, expected=None, **kwargs):
         self.field = field
         self.value = value
+        self.expected = expected
 
-        # Формируем детальное сообщение
-        detailed_message = message
-        if field:
-            detailed_message += f" (поле: {field})"
-        if value is not None:
-            detailed_message += f" (значение: {value})"
+        # Формируем сообщение
+        if 'tech_message' not in kwargs:
+            kwargs['tech_message'] = f"Ошибка валидации поля '{field}'"
+            if value is not None:
+                kwargs['tech_message'] += f": значение '{value}'"
+            if expected:
+                kwargs['tech_message'] += f", ожидалось: {expected}"
 
-        super().__init__(detailed_message, user_message, 'warning')
+        if 'user_message' not in kwargs:
+            kwargs['user_message'] = Messages.Errors.VALIDATION_ERROR
 
+        kwargs.setdefault('log_level', 'warning')
 
-class ArraySizeError(ValidationError):
-    """Ошибка размера массива."""
-
-    def __init__(self, expected_size, actual_size, array_name="массив"):
-        message = f"Неверный размер {array_name}: ожидалось {expected_size}, получено {actual_size}"
-        user_message = f"{array_name.capitalize()} должен содержать {expected_size} элементов"
-        super().__init__(message, 'size', actual_size, user_message)
+        super().__init__(**kwargs)
 
 
-class NumberRangeError(ValidationError):
-    """Ошибка диапазона чисел."""
+class InputValidationException(ValidationException):
+    """Исключение для ошибок валидации ввода."""
 
-    def __init__(self, value, min_val, max_val, field_name="значение"):
-        message = f"{field_name} {value} вне диапазона [{min_val}, {max_val}]"
-        user_message = f"Введите {field_name} от {min_val} до {max_val}"
-        super().__init__(message, field_name, value, user_message)
-
-
-class MatrixDimensionError(ValidationError):
-    """Ошибка размерности матрицы."""
-
-    def __init__(self, expected_rows, expected_cols, actual_rows, actual_cols):
-        message = f"Неверные размеры матрицы: ожидалось {expected_rows}x{expected_cols}, получено {actual_rows}x{actual_cols}"
-        user_message = f"Матрица должна быть размером {expected_rows}x{expected_cols}"
-        super().__init__(message, 'dimensions', f"{actual_rows}x{actual_cols}", user_message)
-
-
-class DataTypeError(ValidationError):
-    """Ошибка типа данных."""
-
-    def __init__(self, expected_type, actual_type, field_name="данные"):
-        message = f"Неверный тип {field_name}: ожидался {expected_type}, получен {actual_type}"
-        user_message = f"Введите {field_name} правильного типа ({expected_type})"
-        super().__init__(message, 'type', actual_type, user_message)
-
-
-# ============================================================================
-# ИСКЛЮЧЕНИЯ АЛГОРИТМОВ
-# ============================================================================
-
-class AlgorithmError(AppBaseException):
-    """Базовое исключение для ошибок выполнения алгоритмов."""
-
-    def __init__(self, algorithm_name, message, user_message=None):
-        """
-        Инициализация ошибки алгоритма.
-
-        Параметры:
-        ----------
-        algorithm_name : str
-            Название алгоритма
-        message : str
-            Техническое сообщение об ошибке
-        user_message : str or None
-            Сообщение для пользователя
-        """
-        self.algorithm_name = algorithm_name
-        full_message = f"Алгоритм '{algorithm_name}': {message}"
-        user_message = user_message or f"Ошибка выполнения алгоритма '{algorithm_name}'"
-        super().__init__(full_message, user_message, 'error')
-
-
-class AlgorithmExecutionError(AlgorithmError):
-    """Ошибка выполнения алгоритма."""
-
-    def __init__(self, algorithm_name, step=None, details=None):
-        message = f"Ошибка на шаге выполнения"
-        if step:
-            message += f" (шаг: {step})"
-        if details:
-            message += f": {details}"
-        user_message = f"Ошибка при выполнении алгоритма"
-        super().__init__(algorithm_name, message, user_message)
-
-
-class AlgorithmDataError(AlgorithmError):
-    """Ошибка данных для алгоритма."""
-
-    def __init__(self, algorithm_name, data_description, issue):
-        message = f"Некорректные данные: {data_description} - {issue}"
-        user_message = f"Некорректные данные для алгоритма"
-        super().__init__(algorithm_name, message, user_message)
-
-
-# ============================================================================
-# ИСКЛЮЧЕНИЯ ПОЛЬЗОВАТЕЛЬСКОГО ВВОДА
-# ============================================================================
-
-class InputError(AppBaseException):
-    """Базовое исключение для ошибок ввода."""
-
-    def __init__(self, input_type, message, user_message=None):
-        """
-        Инициализация ошибки ввода.
-
-        Параметры:
-        ----------
-        input_type : str
-            Тип ввода ('manual', 'file', 'generated')
-        message : str
-            Техническое сообщение об ошибке
-        user_message : str or None
-            Сообщение для пользователя
-        """
+    def __init__(self, input_type='manual', **kwargs):
         self.input_type = input_type
-        full_message = f"Ошибка ввода ({input_type}): {message}"
-        user_message = user_message or "Ошибка при вводе данных"
-        super().__init__(full_message, user_message, 'warning')
+        kwargs.setdefault('context', f'input_validation_{input_type}')
+        super().__init__(**kwargs)
 
 
-class UserInputError(InputError):
-    """Ошибка ручного ввода пользователя."""
+class DataValidationException(ValidationException):
+    """Исключение для ошибок валидации данных."""
 
-    def __init__(self, field_name, value, expected_format):
-        message = f"Некорректный ввод для поля '{field_name}': '{value}'"
-        user_message = f"Введите '{field_name}' в формате: {expected_format}"
-        super().__init__('manual', message, user_message)
+    def __init__(self, data_type=None, **kwargs):
+        self.data_type = data_type
+        kwargs.setdefault('context', f'data_validation_{data_type or "unknown"}')
+        super().__init__(**kwargs)
 
 
-class FileInputError(InputError):
-    """Ошибка чтения файла."""
+# ============================================================================
+# КОНКРЕТНЫЕ ИСКЛЮЧЕНИЯ ВАЛИДАЦИИ
+# ============================================================================
 
-    def __init__(self, filename, issue):
-        message = f"Ошибка чтения файла '{filename}': {issue}"
-        user_message = f"Ошибка при чтении файла {filename}"
-        super().__init__('file', message, user_message)
+class EmptyInputException(InputValidationException):
+    """Исключение для пустого ввода."""
+
+    def __init__(self, field, **kwargs):
+        tech_msg = f"Пустой ввод для поля '{field}'"
+        user_msg = f"{Messages.Errors.EMPTY_INPUT}: '{field}'"
+
+        super().__init__(
+            field=field,
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected="непустое значение",
+            **kwargs
+        )
+
+
+class InvalidNumberException(InputValidationException):
+    """Исключение для некорректного числа."""
+
+    def __init__(self, field, value, **kwargs):
+        tech_msg = f"Некорректное число для поля '{field}': '{value}'"
+        user_msg = f"{Messages.Errors.INVALID_NUMBER} для '{field}'"
+
+        super().__init__(
+            field=field,
+            value=value,
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected="корректное число",
+            **kwargs
+        )
+
+
+class InvalidChoiceException(InputValidationException):
+    """Исключение для неверного выбора."""
+
+    def __init__(self, field, value, valid_choices, **kwargs):
+        tech_msg = f"Неверный выбор для '{field}': '{value}'"
+        user_msg = f"{Messages.Errors.INVALID_CHOICE}. Доступно: {valid_choices}"
+
+        super().__init__(
+            field=field,
+            value=value,
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected=f"один из {valid_choices}",
+            **kwargs
+        )
+
+
+class ArraySizeException(DataValidationException):
+    """Исключение для ошибки размера массива."""
+
+    def __init__(self, expected, actual, array_name="массив", **kwargs):
+        tech_msg = f"Неверный размер {array_name}: ожидалось {expected}, получено {actual}"
+        user_msg = f"{Messages.Errors.ARRAY_SIZE_MISMATCH}: {array_name} должен иметь размер {expected}"
+
+        super().__init__(
+            field='size',
+            value=actual,
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected=f"размер {expected}",
+            data_type='array',
+            **kwargs
+        )
+
+
+class MatrixDimensionException(DataValidationException):
+    """Исключение для ошибки размерности матрицы."""
+
+    def __init__(self, expected_rows, expected_cols, actual_rows, actual_cols, **kwargs):
+        tech_msg = f"Неверные размеры матрицы: ожидалось {expected_rows}x{expected_cols}, получено {actual_rows}x{actual_cols}"
+        user_msg = f"{Messages.Errors.MATRIX_DIMENSION_INVALID}: требуется {expected_rows}x{expected_cols}"
+
+        super().__init__(
+            field='dimensions',
+            value=f"{actual_rows}x{actual_cols}",
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected=f"{expected_rows}x{expected_cols}",
+            data_type='matrix',
+            **kwargs
+        )
+
+
+class ValueRangeException(DataValidationException):
+    """Исключение для значения вне диапазона."""
+
+    def __init__(self, field, value, min_val, max_val, **kwargs):
+        tech_msg = f"Значение '{value}' вне диапазона [{min_val}, {max_val}] для поля '{field}'"
+        user_msg = f"{Messages.Errors.VALUE_OUT_OF_RANGE} для '{field}': от {min_val} до {max_val}"
+
+        super().__init__(
+            field=field,
+            value=value,
+            tech_message=tech_msg,
+            user_message=user_msg,
+            expected=f"значение в [{min_val}, {max_val}]",
+            **kwargs
+        )
 
 
 # ============================================================================
 # ИСКЛЮЧЕНИЯ СОСТОЯНИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 
-class StateError(AppBaseException):
-    """Ошибка состояния приложения."""
+class StateException(AppException):
+    """Базовое исключение для ошибок состояния приложения."""
 
-    def __init__(self, current_state, required_state, operation):
-        message = f"Невозможно выполнить '{operation}' в состоянии '{current_state}'"
-        user_message = f"Сначала выполните: {required_state}"
-        super().__init__(message, user_message, 'warning')
+    def __init__(self, current_state, required_state, operation, **kwargs):
+        self.current_state = current_state
+        self.required_state = required_state
+        self.operation = operation
 
+        tech_msg = f"Невозможно выполнить '{operation}' в состоянии '{current_state}'"
+        user_msg = f"Сначала выполните: {required_state}"
 
-class NoTaskSelectedError(StateError):
-    """Ошибка: задание не выбрано."""
+        kwargs.setdefault('log_level', 'warning')
+        kwargs.setdefault('context', 'state_error')
 
-    def __init__(self, operation):
-        super().__init__("задание не выбрано", "выбор задания", operation)
-
-
-class NoDataEnteredError(StateError):
-    """Ошибка: данные не введены."""
-
-    def __init__(self, operation):
-        super().__init__("данные не введены", "ввод данных", operation)
+        super().__init__(tech_msg, user_msg, **kwargs)
 
 
-class AlgorithmNotExecutedError(StateError):
-    """Ошибка: алгоритм не выполнен."""
+class NoTaskSelectedException(StateException):
+    """Исключение при попытке операции без выбранного задания."""
 
-    def __init__(self, operation):
-        super().__init__("алгоритм не выполнен", "выполнение алгоритма", operation)
+    def __init__(self, operation, **kwargs):
+        super().__init__(
+            current_state="задание не выбрано",
+            required_state="выбор задания",
+            operation=operation,
+            **kwargs
+        )
+
+
+class NoDataEnteredException(StateException):
+    """Исключение при попытке операции без введенных данных."""
+
+    def __init__(self, operation, **kwargs):
+        super().__init__(
+            current_state="данные не введены",
+            required_state="ввод данных",
+            operation=operation,
+            **kwargs
+        )
+
+
+class AlgorithmNotExecutedException(StateException):
+    """Исключение при попытке операции без выполненного алгоритма."""
+
+    def __init__(self, operation, **kwargs):
+        super().__init__(
+            current_state="алгоритм не выполнен",
+            required_state="выполнение алгоритма",
+            operation=operation,
+            **kwargs
+        )
 
 
 # ============================================================================
-# ДЕКОРАТОРЫ ДЛЯ ОБРАБОТКИ ИСКЛЮЧЕНИЙ
+# ИСКЛЮЧЕНИЯ АЛГОРИТМОВ
 # ============================================================================
 
-def handle_app_exceptions(default_return=None, log_level='error'):
+class AlgorithmException(AppException):
+    """Базовое исключение для ошибок алгоритмов."""
+
+    def __init__(self, algorithm_name, step=None, **kwargs):
+        self.algorithm_name = algorithm_name
+        self.step = step
+
+        tech_msg = f"Ошибка в алгоритме '{algorithm_name}'"
+        if step:
+            tech_msg += f" на шаге '{step}'"
+
+        user_msg = Messages.Errors.ALGORITHM_EXECUTION_ERROR
+
+        kwargs.setdefault('log_level', 'error')
+        kwargs.setdefault('context', f'algorithm_{algorithm_name}')
+
+        super().__init__(tech_msg, user_msg, **kwargs)
+
+
+class AlgorithmExecutionException(AlgorithmException):
+    """Исключение при ошибке выполнения алгоритма."""
+
+    def __init__(self, algorithm_name, step=None, error_details=None, **kwargs):
+        self.error_details = error_details
+
+        if error_details and 'details' not in kwargs:
+            kwargs['details'] = error_details
+
+        super().__init__(algorithm_name, step, **kwargs)
+
+
+class AlgorithmDataException(AlgorithmException):
+    """Исключение при ошибке данных для алгоритма."""
+
+    def __init__(self, algorithm_name, data_description, issue, **kwargs):
+        tech_msg = f"Некорректные данные для алгоритма '{algorithm_name}': {data_description} - {issue}"
+        user_msg = Messages.Errors.ALGORITHM_DATA_ERROR
+
+        kwargs['tech_message'] = tech_msg
+        kwargs['user_message'] = user_msg
+
+        super().__init__(algorithm_name, **kwargs)
+
+
+# ============================================================================
+# ИСКЛЮЧЕНИЯ ФАЙЛОВОЙ СИСТЕМЫ
+# ============================================================================
+
+class FileSystemException(AppException):
+    """Базовое исключение для ошибок файловой системы."""
+
+    def __init__(self, operation, path=None, **kwargs):
+        self.operation = operation
+        self.path = path
+
+        tech_msg = f"Ошибка при {operation}"
+        if path:
+            tech_msg += f" пути '{path}'"
+
+        kwargs.setdefault('log_level', 'error')
+        kwargs.setdefault('context', 'file_system')
+
+        super().__init__(tech_msg, **kwargs)
+
+
+class FileReadException(FileSystemException):
+    """Исключение при ошибке чтения файла."""
+
+    def __init__(self, filename, issue, **kwargs):
+        super().__init__(
+            operation="чтении файла",
+            path=filename,
+            details=issue,
+            **kwargs
+        )
+
+
+class FileWriteException(FileSystemException):
+    """Исключение при ошибке записи в файл."""
+
+    def __init__(self, filename, issue, **kwargs):
+        super().__init__(
+            operation="записи в файл",
+            path=filename,
+            details=issue,
+            **kwargs
+        )
+
+
+# ============================================================================
+# ДЕКОРАТОРЫ И УТИЛИТЫ ДЛЯ ОБРАБОТКИ ИСКЛЮЧЕНИЙ
+# ============================================================================
+
+def exception_handler(default_return=None, log_unhandled=True):
     """
-    Декоратор для обработки исключений приложения.
+    Декоратор для обработки исключений в функциях.
 
-    Параметры:
-    ----------
-    default_return : any
-        Значение, возвращаемое при возникновении исключения
-    log_level : str
-        Уровень логирования исключения
-
-    Возвращает:
-    -----------
-    decorator
-        Декоратор функции
+    Args:
+        default_return: Значение, возвращаемое при возникновении исключения
+        log_unhandled: Логировать ли необработанные исключения
     """
 
     def decorator(func):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
-            except AppBaseException as e:
-                # Исключения приложения логируются при создании
-                # Возвращаем значение по умолчанию
+            except AppException as e:
+                # Исключения приложения уже залогированы
                 return default_return
             except Exception as e:
-                # Логируем неожиданные исключения
-                logger_method = getattr(logger, log_level, logger.error)
-                logger_method(
-                    f"НЕОЖИДАННОЕ ИСКЛЮЧЕНИЕ в {func.__name__}: "
-                    f"{type(e).__name__}: {str(e)}"
-                )
+                if log_unhandled:
+                    logger.error(
+                        f"НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ в {func.__name__}: "
+                        f"{type(e).__name__}: {str(e)}"
+                    )
                 return default_return
 
         wrapper.__name__ = func.__name__
@@ -284,28 +413,76 @@ def handle_app_exceptions(default_return=None, log_level='error'):
     return decorator
 
 
-def safe_execute(func, *args, **kwargs):
+def safe_execute(func, *args, error_return=None, **kwargs):
     """
     Безопасное выполнение функции с обработкой исключений.
 
-    Параметры:
-    ----------
-    func : callable
-        Функция для выполнения
-    *args, **kwargs
-        Аргументы функции
+    Args:
+        func: Функция для выполнения
+        error_return: Значение, возвращаемое при ошибке
+        *args, **kwargs: Аргументы функции
 
-    Возвращает:
-    -----------
-    tuple
-        (success: bool, result: any or None, error: Exception or None)
+    Returns:
+        tuple: (success, result, exception)
     """
     try:
         result = func(*args, **kwargs)
         return True, result, None
-    except AppBaseException as e:
-        # Исключения приложения уже залогированы
-        return False, None, e
+    except AppException as e:
+        return False, error_return, e
     except Exception as e:
         logger.error(f"Неожиданная ошибка в {func.__name__}: {e}")
-        return False, None, e
+        return False, error_return, e
+
+
+class ExceptionManager:
+    """Менеджер для централизованного управления исключениями."""
+
+    def __init__(self):
+        self.error_history = []
+        self.logger = get_logger('exception_manager')
+
+    def handle(self, exception, context=None):
+        """
+        Обработка исключения с сохранением в истории.
+
+        Args:
+            exception: Исключение для обработки
+            context: Контекст возникновения
+
+        Returns:
+            dict: Информация об обработанном исключении
+        """
+        error_info = {
+            'timestamp': self.logger.get_now(),
+            'type': type(exception).__name__,
+            'message': str(exception),
+            'context': context,
+            'details': exception.to_dict() if hasattr(exception, 'to_dict') else None
+        }
+
+        self.error_history.append(error_info)
+
+        # Ограничиваем размер истории
+        if len(self.error_history) > 100:
+            self.error_history = self.error_history[-50:]
+
+        self.logger.debug(f"Исключение обработано: {error_info}")
+        return error_info
+
+    def get_error_history(self, limit=10):
+        """Получение истории ошибок."""
+        return self.error_history[-limit:] if limit else self.error_history
+
+    def clear_history(self):
+        """Очистка истории ошибок."""
+        self.error_history.clear()
+        self.logger.info("История ошибок очищена")
+
+    def get_last_error(self):
+        """Получение последней ошибки."""
+        return self.error_history[-1] if self.error_history else None
+
+
+# Глобальный менеджер исключений
+exception_manager = ExceptionManager()
