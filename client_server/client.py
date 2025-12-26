@@ -15,11 +15,11 @@ from datetime import datetime
 from typing import Optional, Callable, Any
 from queue import Queue
 
-from shared.protocols import (
+from protocols import (
     Message, MessageType, TaskRequest, TaskResponse,
     TaskType, ClientServerProtocol
 )
-from client.client_logger import ClientLogger
+from client_server import Client
 
 
 class Client:

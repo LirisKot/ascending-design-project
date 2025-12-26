@@ -12,7 +12,7 @@ import random
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from client.client import Client
+from client import Client
 from shared.protocols import TaskType
 from client.client_logger import ClientLogger
 
