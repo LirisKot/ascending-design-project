@@ -13,8 +13,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from client import Client
-from shared.protocols import TaskType
-from client.client_logger import ClientLogger
+from protocols import TaskType
+from client_logger import ClientLogger
 
 
 class ClientUI:
@@ -151,9 +151,9 @@ class ClientUI:
 
         elif choice == '2':
             # Генерация
-            size = self._get_number("Размер массивов", min_val=1, max_val=20)
-            min_val = self._get_number("Минимальное значение")
-            max_val = self._get_number("Максимальное значение", min_val=min_val + 1)
+            size = self._get_int("Размер массивов", min_val=1, max_val=20)
+            min_val = self._get_int("Минимальное значение")
+            max_val = self._get_int("Максимальное значение", min_val=min_val + 1)
 
             arr1 = self._generate_random_array(size, min_val, max_val)
             arr2 = self._generate_random_array(size, min_val, max_val)
@@ -221,10 +221,10 @@ class ClientUI:
 
         elif choice == '2':
             # Генерация
-            rows = self._get_number("Количество строк", min_val=1, max_val=5)
-            cols = self._get_number("Количество столбцов", min_val=1, max_val=5)
-            min_val = self._get_number("Минимальное значение")
-            max_val = self._get_number("Максимальное значение", min_val=min_val + 1)
+            rows = self._get_int("Количество строк", min_val=1, max_val=5)
+            cols = self._get_int("Количество столбцов", min_val=1, max_val=5)
+            min_val = self._get_int("Минимальное значение")
+            max_val = self._get_int("Максимальное значение", min_val=min_val + 1)
 
             matrix = self._generate_random_matrix(rows, cols, min_val, max_val)
 
@@ -311,9 +311,9 @@ class ClientUI:
 
         elif choice == '2':
             # Генерация
-            size = self._get_number("Размер массивов", min_val=1, max_val=15)
-            min_val = self._get_number("Минимальное значение (рекомендуется >=10)", min_val=10)
-            max_val = self._get_number("Максимальное значение", min_val=min_val + 1)
+            size = self._get_int("Размер массивов", min_val=1, max_val=15)
+            min_val = self._get_int("Минимальное значение (рекомендуется >=10)", min_val=10)
+            max_val = self._get_int("Максимальное значение", min_val=min_val + 1)
 
             arr1 = self._generate_random_array(size, min_val, max_val)
             arr2 = self._generate_random_array(size, min_val, max_val)
@@ -379,9 +379,9 @@ class ClientUI:
 
         if choice == '1':
             # Генерация массива
-            size = self._get_number("Размер массива", min_val=1, max_val=50)
-            min_val = self._get_number("Минимальное значение")
-            max_val = self._get_number("Максимальное значение", min_val=min_val + 1)
+            size = self._get_int("Размер массива", min_val=1, max_val=20)
+            min_val = self._get_int("Минимальное значение")
+            max_val = self._get_int("Максимальное значение", min_val=min_val + 1)
 
             print(f"\nОтправка запроса на генерацию массива...")
 
@@ -405,10 +405,10 @@ class ClientUI:
 
         elif choice == '2':
             # Генерация матрицы
-            rows = self._get_number("Количество строк", min_val=1, max_val=5)
-            cols = self._get_number("Количество столбцов", min_val=1, max_val=5)
-            min_val = self._get_number("Минимальное значение")
-            max_val = self._get_number("Максимальное значение", min_val=min_val + 1)
+            rows = self._get_int("Количество строк", min_val=1, max_val=5)
+            cols = self._get_int("Количество столбцов", min_val=1, max_val=5)
+            min_val = self._get_int("Минимальное значение")
+            max_val = self._get_int("Максимальное значение", min_val=min_val + 1)
 
             print(f"\nОтправка запроса на генерацию матрицы...")
 
@@ -530,9 +530,9 @@ class ClientUI:
             print(f"Ошибка ввода: {e}")
             return None
 
-    def _get_number(self, prompt: str, min_val: float = None, max_val: float = None) -> float:
+    def _get_int(self, prompt: str, min_val: int = None, max_val: int = None) -> int:
         """
-        Получение числа от пользователя с валидацией.
+        Получение целого числа от пользователя.
 
         Args:
             prompt: Подсказка для ввода
@@ -540,11 +540,12 @@ class ClientUI:
             max_val: Максимальное значение
 
         Returns:
-            Введенное число
+            Введенное целое число
         """
         while True:
             try:
-                value = float(input(f"{prompt}: ").strip())
+                value_str = input(f"{prompt}: ").strip()
+                value = int(value_str)
 
                 if min_val is not None and value < min_val:
                     print(f"Ошибка: значение должно быть не меньше {min_val}")
@@ -557,18 +558,28 @@ class ClientUI:
                 return value
 
             except ValueError:
-                print("Ошибка: введите число!")
+                print("Ошибка: введите целое число!")
             except Exception as e:
                 print(f"Ошибка: {e}")
+
 
     def _generate_random_array(self, size: int, min_val: int, max_val: int) -> list:
         """Генерация случайного массива."""
         import random
+        # Преобразуем в целые числа
+        size = int(size)
+        min_val = int(min_val)
+        max_val = int(max_val)
         return [random.randint(min_val, max_val) for _ in range(size)]
 
     def _generate_random_matrix(self, rows: int, cols: int, min_val: int, max_val: int) -> list:
         """Генерация случайной матрицы."""
         import random
+        # Преобразуем в целые числа
+        rows = int(rows)
+        cols = int(cols)
+        min_val = int(min_val)
+        max_val = int(max_val)
         return [
             [random.randint(min_val, max_val) for _ in range(cols)]
             for _ in range(rows)

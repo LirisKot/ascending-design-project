@@ -8,10 +8,9 @@
 
 import sys
 import os
-import traceback
 from datetime import datetime
 
-from utils.messages import Messages
+from utils import Messages
 from utils.logger import get_logger, FunctionLogger
 from utils.exceptions import (
     exception_handler, safe_execute, exception_manager
@@ -118,22 +117,26 @@ class ApplicationController:
         print(Messages.Format.subsection("ВВОД ДАННЫХ"))
 
         try:
-            print(Messages.Menu.INPUT_METHOD)
-            for option in Messages.Menu.INPUT_OPTIONS:
-                print(option)
+            # Проверяем, выбрано ли задание
+            if not self.task_service.current_task:
+                print(Messages.Format.error("Сначала выберите задание (пункт 1)"))
+                return True
 
-            choice = input("\nВаш выбор (1-2): ").strip()
-            self.validation_service.validate_not_empty(choice, "способ ввода")
-            self.validation_service.validate_choice(choice, "способ ввода", ['1', '2'])
+            # Проверяем тип задания
+            task_number = self.task_service.current_task
 
-            is_random = (choice == '2')
-
-            # Получаем данные в зависимости от выбранного задания
-            data = self._get_input_data(is_random)
-
-            if data:
-                self.task_service.set_task_data(data)
-                print(Messages.Format.success(Messages.Success.DATA_SAVED))
+            if task_number == 1:
+                # Задание 1: Два массива
+                return self._handle_task1_data_input()
+            elif task_number == 3:
+                # Задание 3: Матрица
+                return self._handle_task3_data_input()
+            elif task_number == 8:
+                # Задание 8: Два массива
+                return self._handle_task8_data_input()
+            else:
+                print(Messages.Format.error("Неизвестное задание"))
+                return True
 
         except Exception as e:
             exception_manager.handle(e, 'data_input')
@@ -141,140 +144,208 @@ class ApplicationController:
 
         return True
 
-    def _get_input_data(self, is_random):
-        """
-        Получение данных в зависимости от выбранного задания.
+    def _handle_task1_data_input(self):
+        """Ввод данных для задания 1: сумма массивов."""
+        print("\n" + Messages.Tasks.Task1.DESCRIPTION)
 
-        Args:
-            is_random: True для случайной генерации
+        print(f"\n{Messages.Menu.INPUT_METHOD}")
+        for option in Messages.Menu.INPUT_OPTIONS:
+            print(option)
 
-        Returns:
-            any: Данные для задания
-        """
-        from utils.input_operations import (
-            manual_input_array, generate_random_array,
-            generate_random_matrix
-        )
+        choice = input("\nВаш выбор (1-2): ").strip()
+        self.validation_service.validate_not_empty(choice, "способ ввода")
+        self.validation_service.validate_choice(choice, "способ ввода", ['1', '2'])
 
-        task_number = self.task_service.current_task
-
-        if task_number in [1, 8]:
-            return self._get_array_data(task_number, is_random)
-        elif task_number == 3:
-            return self._get_matrix_data(is_random)
-
-        return None
-
-    def _get_array_data(self, task_number, is_random):
-        """Получение данных для заданий с массивами."""
-        from utils.input_operations import manual_input_array, generate_random_array
+        is_random = (choice == '2')
 
         if is_random:
-            # Генерация случайных массивов
             print("\n[Генерация случайных массивов]")
 
+            # Получаем общий размер для обоих массивов
             size = self._get_validated_input(
                 Messages.Tasks.Task1.SIZE_PROMPT,
                 'размер массивов',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
+            # Получаем диапазон значений
             min_val = self._get_validated_input(
                 Messages.Tasks.Task1.MIN_PROMPT,
-                'минимальное значение'
+                'минимальное значение',
+                allow_float=False
             )
 
             max_val = self._get_validated_input(
                 Messages.Tasks.Task1.MAX_PROMPT,
                 'максимальное значение',
-                min_val=min_val + 1
+                min_val=min_val + 1,
+                allow_float=False
             )
+
+            # Генерируем массивы
+            from utils.input_operations import generate_random_array
 
             arr1 = generate_random_array(size, min_val, max_val)
             arr2 = generate_random_array(size, min_val, max_val)
 
-            print(f"\nСгенерированы массивы:")
-            print(f"  Массив 1: {Messages.Format.array_display(arr1)}")
-            print(f"  Массив 2: {Messages.Format.array_display(arr2)}")
+            print(f"\n✓ Сгенерированы массивы:")
+            print(f"  Массив 1 ({size} элементов): {Messages.Format.array_display(arr1)}")
+            print(f"  Массив 2 ({size} элементов): {Messages.Format.array_display(arr2)}")
 
-            return (arr1, arr2)
+            # Сохраняем данные
+            data = (arr1, arr2)
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
 
         else:
-            # Ручной ввод массивов
             print("\n[Ручной ввод массивов]")
 
+            # Получаем размер массивов
             size = self._get_validated_input(
                 Messages.Tasks.Task1.SIZE_PROMPT,
                 'размер массивов',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
-            print(f"\n--- Первый массив ---")
+            from utils.input_operations import manual_input_array
+
+            print(f"\n--- Первый массив ({size} элементов) ---")
             arr1 = manual_input_array(
-                f"{Messages.Tasks.Task1.INPUT_PROMPT} ({size} чисел): "
+                f"{Messages.Tasks.Task1.INPUT_PROMPT} "
             )
-            self.validation_service.validate_array_size(arr1, size, "первый массив")
 
-            print(f"\n--- Второй массив ---")
+            # Проверяем размер
+            if len(arr1) != size:
+                print(Messages.Format.error(f"Ожидается {size} элементов, получено {len(arr1)}"))
+                # Автоматически обрезаем или дополняем
+                if len(arr1) > size:
+                    arr1 = arr1[:size]
+                    print(f"Массив обрезан до {size} элементов: {arr1}")
+                else:
+                    print("Введите недостающие элементы:")
+                    while len(arr1) < size:
+                        try:
+                            num = input(f"Элемент {len(arr1) + 1}: ").strip()
+                            if '.' in num:
+                                arr1.append(float(num))
+                            else:
+                                arr1.append(int(num))
+                        except ValueError:
+                            print("Пожалуйста, введите число")
+
+            print(f"\n--- Второй массив ({size} элементов) ---")
             arr2 = manual_input_array(
-                f"{Messages.Tasks.Task1.INPUT_PROMPT} ({size} чисел): "
+                f"{Messages.Tasks.Task1.INPUT_PROMPT} "
             )
-            self.validation_service.validate_array_size(arr2, size, "второй массив")
 
-            return (arr1, arr2)
+            # Проверяем размер
+            if len(arr2) != size:
+                print(Messages.Format.error(f"Ожидается {size} элементов, получено {len(arr2)}"))
+                if len(arr2) > size:
+                    arr2 = arr2[:size]
+                    print(f"Массив обрезан до {size} элементов: {arr2}")
+                else:
+                    print("Введите недостающие элементы:")
+                    while len(arr2) < size:
+                        try:
+                            num = input(f"Элемент {len(arr2) + 1}: ").strip()
+                            if '.' in num:
+                                arr2.append(float(num))
+                            else:
+                                arr2.append(int(num))
+                        except ValueError:
+                            print("Пожалуйста, введите число")
 
-    def _get_matrix_data(self, is_random):
-        """Получение данных для задания с матрицей."""
-        from utils.input_operations import generate_random_matrix
+            print(f"\n✓ Введены массивы:")
+            print(f"  Массив 1: {Messages.Format.array_display(arr1)}")
+            print(f"  Массив 2: {Messages.Format.array_display(arr2)}")
+
+            # Сохраняем данные
+            data = (arr1, arr2)
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
+
+        return True
+
+    def _handle_task3_data_input(self):
+        """Ввод данных для задания 3: поворот матрицы."""
+        print("\n" + Messages.Tasks.Task3.DESCRIPTION)
+
+        print(f"\n{Messages.Menu.INPUT_METHOD}")
+        for option in Messages.Menu.INPUT_OPTIONS:
+            print(option)
+
+        choice = input("\nВаш выбор (1-2): ").strip()
+        self.validation_service.validate_not_empty(choice, "способ ввода")
+        self.validation_service.validate_choice(choice, "способ ввода", ['1', '2'])
+
+        is_random = (choice == '2')
 
         if is_random:
-            # Генерация случайной матрицы
             print("\n[Генерация случайной матрицы]")
 
+            # Получаем размеры матрицы
             rows = self._get_validated_input(
                 Messages.Tasks.Task3.ROWS_PROMPT,
                 'количество строк',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
             cols = self._get_validated_input(
                 Messages.Tasks.Task3.COLS_PROMPT,
                 'количество столбцов',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
+            # Получаем диапазон значений
             min_val = self._get_validated_input(
                 "Минимальное значение: ",
-                'минимальное значение'
+                'минимальное значение',
+                allow_float=False
             )
 
             max_val = self._get_validated_input(
                 "Максимальное значение: ",
                 'максимальное значение',
-                min_val=min_val + 1
+                min_val=min_val + 1,
+                allow_float=False
             )
 
-            matrix = generate_random_matrix(rows, cols, min_val, max_val)
+            # Генерируем матрицу
+            import random
+            matrix = [
+                [random.randint(min_val, max_val) for _ in range(cols)]
+                for _ in range(rows)
+            ]
 
-            print(f"\nСгенерирована матрица:")
+            print(f"\n✓ Сгенерирована матрица {rows}x{cols}:")
             print(Messages.Format.matrix_display(matrix))
 
-            return matrix
+            # Сохраняем данные
+            data = matrix
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
 
         else:
-            # Ручной ввод матрицы
             print("\n[Ручной ввод матрицы]")
 
+            # Получаем размеры матрицы
             rows = self._get_validated_input(
                 Messages.Tasks.Task3.ROWS_PROMPT,
                 'количество строк',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
             cols = self._get_validated_input(
                 Messages.Tasks.Task3.COLS_PROMPT,
                 'количество столбцов',
-                min_val=1
+                min_val=1,
+                allow_float=False
             )
 
             print(f"\nВведите матрицу {rows}x{cols} (по строкам):")
@@ -289,8 +360,26 @@ class ApplicationController:
 
                         self.validation_service.validate_not_empty(row_input, f"строка {i + 1}")
 
-                        row = [float(x) for x in row_input.split()]
-                        self.validation_service.validate_array_size(row, cols, f"строка {i + 1}")
+                        row = []
+                        for x in row_input.split():
+                            if '.' in x:
+                                row.append(float(x))
+                            else:
+                                row.append(int(x))
+
+                        if len(row) != cols:
+                            print(f"Ошибка: ожидается {cols} элементов, получено {len(row)}")
+                            if len(row) > cols:
+                                row = row[:cols]
+                                print(f"Строка обрезана: {row}")
+                            else:
+                                print("Введите недостающие элементы:")
+                                while len(row) < cols:
+                                    num = input(f"Элемент {len(row) + 1}: ").strip()
+                                    if '.' in num:
+                                        row.append(float(num))
+                                    else:
+                                        row.append(int(num))
 
                         matrix.append(row)
                         break
@@ -299,7 +388,96 @@ class ApplicationController:
                         print(Messages.Format.error(str(e)))
                         print("Попробуйте еще раз:")
 
-            return matrix
+            print(f"\n✓ Введена матрица {rows}x{cols}:")
+            print(Messages.Format.matrix_display(matrix))
+
+            # Сохраняем данные
+            data = matrix
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
+
+        return True
+
+    def _handle_task8_data_input(self):
+        """Ввод данных для задания 8: поиск общих чисел."""
+        print("\n" + Messages.Tasks.Task8.DESCRIPTION)
+
+        print(f"\n{Messages.Menu.INPUT_METHOD}")
+        for option in Messages.Menu.INPUT_OPTIONS:
+            print(option)
+
+        choice = input("\nВаш выбор (1-2): ").strip()
+        self.validation_service.validate_not_empty(choice, "способ ввода")
+        self.validation_service.validate_choice(choice, "способ ввода", ['1', '2'])
+
+        is_random = (choice == '2')
+
+        if is_random:
+            print("\n[Генерация случайных массивов]")
+
+            # Получаем размер для обоих массивов
+            size = self._get_validated_input(
+                Messages.Tasks.Task8.SIZE_PROMPT,
+                'размер массивов',
+                min_val=1,
+                allow_float=False
+            )
+
+            # Для задания 8 рекомендуется min_val >= 10
+            min_val = self._get_validated_input(
+                Messages.Tasks.Task8.MIN_PROMPT,
+                'минимальное значение',
+                min_val=10,
+                allow_float=False
+            )
+
+            max_val = self._get_validated_input(
+                Messages.Tasks.Task8.MAX_PROMPT,
+                'максимальное значение',
+                min_val=min_val + 1,
+                allow_float=False
+            )
+
+            # Генерируем массивы
+            from utils.input_operations import generate_random_array
+
+            arr1 = generate_random_array(size, min_val, max_val)
+            arr2 = generate_random_array(size, min_val, max_val)
+
+            print(f"\n✓ Сгенерированы массивы:")
+            print(f"  Массив 1 ({size} элементов): {Messages.Format.array_display(arr1)}")
+            print(f"  Массив 2 ({size} элементов): {Messages.Format.array_display(arr2)}")
+
+            # Сохраняем данные
+            data = (arr1, arr2)
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
+
+        else:
+            print("\n[Ручной ввод массивов]")
+
+            from utils.input_operations import manual_input_array
+
+            print(f"\n--- Первый массив ---")
+            arr1 = manual_input_array(
+                f"{Messages.Tasks.Task8.INPUT_PROMPT} "
+            )
+
+            print(f"\n--- Второй массив ---")
+            arr2 = manual_input_array(
+                f"{Messages.Tasks.Task8.INPUT_PROMPT} "
+            )
+
+            print(f"\n✓ Введены массивы:")
+            print(f"  Массив 1 ({len(arr1)} элементов): {Messages.Format.array_display(arr1)}")
+            print(f"  Массив 2 ({len(arr2)} элементов): {Messages.Format.array_display(arr2)}")
+
+            # Сохраняем данные
+            data = (arr1, arr2)
+            self.task_service.set_task_data(data)
+            print(Messages.Format.success(Messages.Success.DATA_SAVED))
+
+        return True
 
     def _get_validated_input(self, prompt, field_name, **constraints):
         """
@@ -350,6 +528,11 @@ class ApplicationController:
         print(Messages.Format.subsection("ВЫПОЛНЕНИЕ АЛГОРИТМА"))
 
         try:
+            # Проверяем, есть ли данные
+            if not self.task_service.has_data():
+                print(Messages.Format.error("Сначала введите данные (пункт 2)"))
+                return True
+
             # Для задания 3 нужен дополнительный параметр
             kwargs = {}
             if self.task_service.current_task == 3:
@@ -381,6 +564,11 @@ class ApplicationController:
         print(Messages.Format.subsection("ВЫВОД РЕЗУЛЬТАТА"))
 
         try:
+            # Проверяем, выполнен ли алгоритм
+            if not self.task_service.has_result():
+                print(Messages.Format.error("Сначала выполните алгоритм (пункт 3)"))
+                return True
+
             result_display = self.task_service.get_result_display()
             print(result_display)
 
@@ -481,11 +669,6 @@ class ApplicationController:
     def _handle_exception_test(self):
         """Тестирование системы исключений."""
         print(Messages.Format.subsection("ТЕСТ СИСТЕМЫ ИСКЛЮЧЕНИЙ"))
-
-        from utils.exceptions import (
-            ArraySizeException, ValueRangeException,
-            InvalidChoiceException, AlgorithmExecutionException
-        )
 
         tests = [
             ("ArraySizeException", lambda: self._test_array_size()),

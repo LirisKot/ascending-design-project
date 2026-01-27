@@ -12,7 +12,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from utils.input_operations import manual_input_array, generate_random_array
-from utils.validation import validate_numbers_only
+from utils.validation import validate_numeric_array
 
 
 def find_common_numbers(arr1, arr2):
@@ -22,7 +22,7 @@ def find_common_numbers(arr1, arr2):
     common = set()
 
     # Проверяем, что массивы содержат только числа
-    if not validate_numbers_only(arr1) or not validate_numbers_only(arr2):
+    if not validate_numeric_array(arr1) or not validate_numeric_array(arr2):
         raise ValueError("Массивы должны содержать только числа")
 
     for num in arr1:

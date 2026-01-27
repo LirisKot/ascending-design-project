@@ -6,8 +6,68 @@
 Разделение по категориям для точной диагностики ошибок.
 """
 
-from utils.messages import Messages
-from utils.logger import get_logger
+import sys
+import os
+
+# Добавляем пути для импорта
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)  # Выходим из client_server в корень
+
+# Добавляем пути в sys.path
+paths_to_add = [
+    project_root,  # корень проекта
+    os.path.join(project_root, 'utils'),  # папка utils
+]
+
+for path in paths_to_add:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
+# Теперь импортируем
+try:
+    from utils.messages import Messages
+    from utils.logger import get_logger
+    HAS_UTILS = True
+except ImportError as e:
+    print(f"⚠ Внимание: не удалось импортировать utils в exceptions.py: {e}")
+    HAS_UTILS = False
+
+    # Создаем заглушки
+    class Messages:
+        class Errors:
+            VALIDATION_ERROR = "Ошибка валидации"
+            EMPTY_INPUT = "Пустой ввод"
+            INVALID_NUMBER = "Некорректное число"
+            INVALID_CHOICE = "Неверный выбор"
+            ARRAY_SIZE_MISMATCH = "Неверный размер массива"
+            MATRIX_DIMENSION_INVALID = "Неверная размерность матрицы"
+            VALUE_OUT_OF_RANGE = "Значение вне диапазона"
+            ALGORITHM_EXECUTION_ERROR = "Ошибка выполнения алгоритма"
+            ALGORITHM_DATA_ERROR = "Ошибка данных алгоритма"
+
+    # Создаем заглушку для логгера
+    class DummyLogger:
+        def __init__(self, name):
+            self.name = name
+
+        def get_now(self):
+            from datetime import datetime
+            return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        def debug(self, msg):
+            print(f"[DEBUG {self.name}] {msg}")
+
+        def info(self, msg):
+            print(f"[INFO {self.name}] {msg}")
+
+        def warning(self, msg):
+            print(f"[WARNING {self.name}] {msg}")
+
+        def error(self, msg):
+            print(f"[ERROR {self.name}] {msg}")
+
+    def get_logger(name):
+        return DummyLogger(name)
 
 logger = get_logger('exceptions')
 
@@ -96,7 +156,10 @@ class ValidationException(AppException):
                 kwargs['tech_message'] += f", ожидалось: {expected}"
 
         if 'user_message' not in kwargs:
-            kwargs['user_message'] = Messages.Errors.VALIDATION_ERROR
+            if HAS_UTILS:
+                kwargs['user_message'] = Messages.Errors.VALIDATION_ERROR
+            else:
+                kwargs['user_message'] = "Ошибка валидации"
 
         kwargs.setdefault('log_level', 'warning')
 
@@ -130,7 +193,11 @@ class EmptyInputException(InputValidationException):
 
     def __init__(self, field, **kwargs):
         tech_msg = f"Пустой ввод для поля '{field}'"
-        user_msg = f"{Messages.Errors.EMPTY_INPUT}: '{field}'"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.EMPTY_INPUT}: '{field}'"
+        else:
+            user_msg = f"Пустой ввод: '{field}'"
 
         super().__init__(
             field=field,
@@ -146,7 +213,11 @@ class InvalidNumberException(InputValidationException):
 
     def __init__(self, field, value, **kwargs):
         tech_msg = f"Некорректное число для поля '{field}': '{value}'"
-        user_msg = f"{Messages.Errors.INVALID_NUMBER} для '{field}'"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.INVALID_NUMBER} для '{field}'"
+        else:
+            user_msg = f"Некорректное число для '{field}'"
 
         super().__init__(
             field=field,
@@ -163,7 +234,11 @@ class InvalidChoiceException(InputValidationException):
 
     def __init__(self, field, value, valid_choices, **kwargs):
         tech_msg = f"Неверный выбор для '{field}': '{value}'"
-        user_msg = f"{Messages.Errors.INVALID_CHOICE}. Доступно: {valid_choices}"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.INVALID_CHOICE}. Доступно: {valid_choices}"
+        else:
+            user_msg = f"Неверный выбор. Доступно: {valid_choices}"
 
         super().__init__(
             field=field,
@@ -180,7 +255,11 @@ class ArraySizeException(DataValidationException):
 
     def __init__(self, expected, actual, array_name="массив", **kwargs):
         tech_msg = f"Неверный размер {array_name}: ожидалось {expected}, получено {actual}"
-        user_msg = f"{Messages.Errors.ARRAY_SIZE_MISMATCH}: {array_name} должен иметь размер {expected}"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.ARRAY_SIZE_MISMATCH}: {array_name} должен иметь размер {expected}"
+        else:
+            user_msg = f"Неверный размер {array_name}: требуется {expected}"
 
         super().__init__(
             field='size',
@@ -198,7 +277,11 @@ class MatrixDimensionException(DataValidationException):
 
     def __init__(self, expected_rows, expected_cols, actual_rows, actual_cols, **kwargs):
         tech_msg = f"Неверные размеры матрицы: ожидалось {expected_rows}x{expected_cols}, получено {actual_rows}x{actual_cols}"
-        user_msg = f"{Messages.Errors.MATRIX_DIMENSION_INVALID}: требуется {expected_rows}x{expected_cols}"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.MATRIX_DIMENSION_INVALID}: требуется {expected_rows}x{expected_cols}"
+        else:
+            user_msg = f"Неверные размеры матрицы: требуется {expected_rows}x{expected_cols}"
 
         super().__init__(
             field='dimensions',
@@ -216,7 +299,11 @@ class ValueRangeException(DataValidationException):
 
     def __init__(self, field, value, min_val, max_val, **kwargs):
         tech_msg = f"Значение '{value}' вне диапазона [{min_val}, {max_val}] для поля '{field}'"
-        user_msg = f"{Messages.Errors.VALUE_OUT_OF_RANGE} для '{field}': от {min_val} до {max_val}"
+
+        if HAS_UTILS:
+            user_msg = f"{Messages.Errors.VALUE_OUT_OF_RANGE} для '{field}': от {min_val} до {max_val}"
+        else:
+            user_msg = f"Значение вне диапазона для '{field}': от {min_val} до {max_val}"
 
         super().__init__(
             field=field,
@@ -300,7 +387,10 @@ class AlgorithmException(AppException):
         if step:
             tech_msg += f" на шаге '{step}'"
 
-        user_msg = Messages.Errors.ALGORITHM_EXECUTION_ERROR
+        if HAS_UTILS:
+            user_msg = Messages.Errors.ALGORITHM_EXECUTION_ERROR
+        else:
+            user_msg = "Ошибка выполнения алгоритма"
 
         kwargs.setdefault('log_level', 'error')
         kwargs.setdefault('context', f'algorithm_{algorithm_name}')
@@ -325,7 +415,11 @@ class AlgorithmDataException(AlgorithmException):
 
     def __init__(self, algorithm_name, data_description, issue, **kwargs):
         tech_msg = f"Некорректные данные для алгоритма '{algorithm_name}': {data_description} - {issue}"
-        user_msg = Messages.Errors.ALGORITHM_DATA_ERROR
+
+        if HAS_UTILS:
+            user_msg = Messages.Errors.ALGORITHM_DATA_ERROR
+        else:
+            user_msg = "Ошибка данных алгоритма"
 
         kwargs['tech_message'] = tech_msg
         kwargs['user_message'] = user_msg
@@ -440,7 +534,7 @@ class ExceptionManager:
 
     def __init__(self):
         self.error_history = []
-        self.logger = get_logger('exception_manager')
+        self.logger = logger  # Используем уже созданный логгер
 
     def handle(self, exception, context=None):
         """
@@ -453,8 +547,12 @@ class ExceptionManager:
         Returns:
             dict: Информация об обработанном исключении
         """
+        # Получаем текущее время
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         error_info = {
-            'timestamp': self.logger.get_now(),
+            'timestamp': timestamp,
             'type': type(exception).__name__,
             'message': str(exception),
             'context': context,

@@ -15,12 +15,13 @@ from datetime import datetime
 from typing import Dict, Optional
 from queue import Queue
 
-from shared.protocols import (
+from protocols import (
     Message, MessageType, TaskRequest, TaskResponse,
     ClientServerProtocol
 )
-from server.server_logger import ServerLogger
-from server.task_processor import TaskProcessor
+from logger_serv import ServerLogger
+from serv_task_proc import TaskProcessor
+
 
 
 class Server:
@@ -352,6 +353,21 @@ class Server:
                 }
                 for client_id, info in self.clients.items()
             ]
+
+    def get_threads_info(self):
+        """Получение информации о потоках сервера."""
+        import threading
+
+        threads = []
+        for thread in threading.enumerate():
+            threads.append({
+                'name': thread.name,
+                'ident': thread.ident,
+                'daemon': thread.daemon,
+                'alive': thread.is_alive()
+            })
+
+        return threads
 
 
 def start_server():

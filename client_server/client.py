@@ -14,12 +14,14 @@ import uuid
 from datetime import datetime
 from typing import Optional, Callable, Any
 from queue import Queue
+from typing import Dict
+from client_logger import ClientLogger
 
 from protocols import (
     Message, MessageType, TaskRequest, TaskResponse,
     TaskType, ClientServerProtocol
 )
-from client_server import Client
+
 
 
 class Client:
@@ -306,20 +308,21 @@ class Client:
 
     def _handle_task_response(self, message: Message):
         """Обработка ответа на задачу."""
-        try:
-            task_response = TaskResponse.from_dict(message.data)
+        with threading.Lock():
+            try:
+                task_response = TaskResponse.from_dict(message.data)
 
-            # Проверяем, есть ли callback для этого сообщения
-            if message.message_id in self.response_callbacks:
-                callback = self.response_callbacks.pop(message.message_id)
-                callback(task_response)
+                # Проверяем, есть ли callback для этого сообщения
+                if message.message_id in self.response_callbacks:
+                    callback = self.response_callbacks.pop(message.message_id)
+                    callback(task_response)
 
-            # Иначе помещаем в очередь для синхронных запросов
-            else:
-                self.response_queue.put(message)
+                # Иначе помещаем в очередь для синхронных запросов
+                else:
+                    self.response_queue.put(message)
 
-        except Exception as e:
-            self.logger.error(f"Ошибка обработки ответа задачи: {e}")
+            except Exception as e:
+                self.logger.error(f"Ошибка обработки ответа задачи: {e}")
 
     def _heartbeat_loop(self):
         """Цикл отправки heartbeat сообщений."""
@@ -432,3 +435,39 @@ class Client:
             'connected': self.connected,
             'connection_time': datetime.now().strftime('%H:%M:%S') if self.connected else None
         }
+
+    def get_threads_info(self):
+        """Получение информации о потоках клиента."""
+        import threading
+
+        threads = []
+        for thread in threading.enumerate():
+            threads.append({
+                'name': thread.name,
+                'ident': thread.ident,
+                'daemon': thread.daemon,
+                'alive': thread.is_alive()
+            })
+
+        return threads
+
+    def disconnect(self):
+        """Отключение от сервера."""
+        if not self.connected:
+            return
+
+        self.logger.info("Отключение от сервера...")
+        self.running = False
+
+        # Даем потокам время на завершение
+        self._stop_threads()
+
+        # Проверяем, что потоки завершились
+        import threading
+        time.sleep(0.5)
+
+        alive_threads = [t for t in threading.enumerate()
+                         if t.name.startswith(f"Thread-") and t.is_alive()]
+
+        if alive_threads:
+            self.logger.warning(f"Осталось активных потоков: {len(alive_threads)}")
