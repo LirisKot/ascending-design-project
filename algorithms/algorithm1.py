@@ -1,4 +1,4 @@
-# algorithms/algorithm1.py (добавь в начало)
+# algorithms/algorithm1.py
 import sys
 import os
 
