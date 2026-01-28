@@ -1,915 +1,887 @@
-# coroutine_menu.py
 """
-АВТОМАТНОЕ ПРОГРАММИРОВАНИЕ ЧЕРЕЗ КОРУТИНЫ
-==========================================
+КОРУТИНОВОЕ МЕНЮ - АВТОМАТНОЕ ПРОГРАММИРОВАНИЕ
+=============================================
 
-Исправленная версия - без return в async generator.
-Используем StopAsyncIteration с value.
+Реализация меню через корутины и автоматное программирование.
+Каждое состояние меню - отдельная корутина.
 """
 
 import asyncio
-from enum import Enum
-from typing import Dict, Any, Optional, AsyncGenerator
-import time
 import sys
 import os
+from typing import Dict, Any, Optional, Callable
+from enum import Enum
+from datetime import datetime
+import random
 
-# Добавляем пути для импорта
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ============================================================================
+# ОПРЕДЕЛЕНИЕ СОСТОЯНИЙ АВТОМАТА
+# ============================================================================
 
-
-class EventType(Enum):
-    """Типы событий для автомата."""
-    ENTER_STATE = "enter_state"
-    EXIT_STATE = "exit_state"
-    USER_INPUT = "user_input"
-    TIMEOUT = "timeout"
-    ERROR = "error"
-    COMPLETE = "complete"
-    STATE_CHANGE = "state_change"  # Новое: запрос смены состояния
-
-
-class State(Enum):
-    """Состояния конечного автомата."""
-    IDLE = "idle"
-    MAIN_MENU = "main_menu"
-    ARRAY_OPS = "array_operations"
-    MATRIX_OPS = "matrix_operations"
-    DATA_VALID = "data_validation"
-    ALGORITHMS = "algorithms"
-    CLIENT_SERVER = "client_server"
-    EXIT = "exit"
-
-
-class Event:
-    """Класс события."""
-
-    def __init__(self, event_type: EventType, data: Any = None):
-        self.type = event_type
-        self.data = data
-        self.timestamp = time.time()
-
-    def __repr__(self):
-        return f"Event({self.type}, data={self.data})"
+class MenuState(Enum):
+    """Состояния автомата меню."""
+    INITIAL = "initial"          # Начальное состояние
+    MAIN_MENU = "main_menu"      # Главное меню
+    TASK_SELECTION = "task_selection"  # Выбор задания
+    TASK1_MENU = "task1_menu"    # Меню задания 1
+    TASK3_MENU = "task3_menu"    # Меню задания 3 (поворот матрицы)
+    TASK8_MENU = "task8_menu"    # Меню задания 8
+    INPUT_METHOD = "input_method"  # Выбор способа ввода
+    MANUAL_INPUT = "manual_input"  # Ручной ввод
+    AUTO_INPUT = "auto_input"    # Автоматический ввод
+    EXECUTION = "execution"      # Выполнение алгоритма
+    RESULT = "result"            # Отображение результата
+    SETTINGS = "settings"        # Настройки
+    LOGGING_SETTINGS = "logging_settings"  # Настройки логирования
+    ERROR = "error"              # Ошибка
+    EXIT = "exit"                # Выход
 
 
-class CoroutineStateMachine:
-    """
-    Конечный автомат на корутинах - исправленная версия.
+class MenuEvent(Enum):
+    """События автомата меню."""
+    START = "start"              # Запуск автомата
+    SELECT_MAIN = "select_main"  # Выбор главного меню
+    SELECT_TASK = "select_task"  # Выбор задания
+    SELECT_INPUT = "select_input"  # Выбор ввода
+    SELECT_MANUAL_INPUT = "select_manual_input"  # Выбор ручного ввода
+    SELECT_AUTO_INPUT = "select_auto_input"  # Выбор автоматического ввода
+    INPUT_COMPLETE = "input_complete"  # Ввод завершен
+    EXECUTE = "execute"          # Выполнить
+    BACK = "back"                # Назад
+    SETTINGS = "settings"        # Настройки
+    ERROR = "error"              # Ошибка
+    EXIT = "exit"                # Выход
 
-    Использует StopAsyncIteration для возврата следующего состояния.
-    """
+
+# ============================================================================
+# КЛАСС АВТОМАТА МЕНЮ
+# ============================================================================
+
+class MenuAutomaton:
+    """Автомат для управления меню через корутины."""
 
     def __init__(self):
-        self.current_state = State.IDLE
-        self.current_coroutine = None
-        self.event_queue = asyncio.Queue()
-        self.state_handlers = self._setup_state_handlers()
-        self.running = False
-        self.state_history = []
-
-    def _setup_state_handlers(self) -> Dict[State, AsyncGenerator]:
-        """Настройка обработчиков состояний."""
-        return {
-            State.IDLE: self.idle_state,
-            State.MAIN_MENU: self.main_menu_state,
-            State.ARRAY_OPS: self.array_ops_state,
-            State.MATRIX_OPS: self.matrix_ops_state,
-            State.DATA_VALID: self.data_valid_state,
-            State.ALGORITHMS: self.algorithms_state,
-            State.CLIENT_SERVER: self.client_server_state,
-            State.EXIT: self.exit_state,
+        self.state = MenuState.INITIAL
+        self.context: Dict[str, Any] = {
+            'selected_task': None,
+            'task_data': None,
+            'task_result': None,
+            'current_input': [],
+            'error_message': None,
+            'start_time': datetime.now()
         }
 
-    async def idle_state(self) -> AsyncGenerator[Event, None]:
-        """Начальное состояние."""
-        print("[IDLE] Система инициализируется...")
+        # Создаем заглушку для логгера если нет импорта
+        class DummyLogger:
+            def debug(self, msg): print(f"[DEBUG] {msg}")
+            def info(self, msg): print(f"[INFO] {msg}")
+            def error(self, msg): print(f"[ERROR] {msg}")
+            def warning(self, msg): print(f"[WARNING] {msg}")
 
-        yield Event(EventType.ENTER_STATE, {"state": State.IDLE})
+        self.logger = DummyLogger()
 
-        # Имитация инициализации
-        await asyncio.sleep(0.5)
+        self.transition_table = self._create_transition_table()
 
-        # Выход из корутины с указанием следующего состояния
-        # Используем StopAsyncIteration с value
-        raise StopAsyncIteration(State.MAIN_MENU)
+        # Регистрация корутин состояний
+        self.state_coroutines = {
+            MenuState.INITIAL: self._state_initial,
+            MenuState.MAIN_MENU: self._state_main_menu,
+            MenuState.TASK_SELECTION: self._state_task_selection,
+            MenuState.TASK1_MENU: self._state_task1_menu,
+            MenuState.TASK3_MENU: self._state_task3_menu,
+            MenuState.TASK8_MENU: self._state_task8_menu,
+            MenuState.INPUT_METHOD: self._state_input_method,
+            MenuState.MANUAL_INPUT: self._state_manual_input,
+            MenuState.AUTO_INPUT: self._state_auto_input,
+            MenuState.EXECUTION: self._state_execution,
+            MenuState.RESULT: self._state_result,
+            MenuState.SETTINGS: self._state_settings,
+            MenuState.LOGGING_SETTINGS: self._state_logging_settings,
+            MenuState.ERROR: self._state_error,
+            MenuState.EXIT: self._state_exit
+        }
 
-    async def main_menu_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние главного меню."""
-        print("\n" + "=" * 60)
-        print("ГЛАВНОЕ МЕНЮ - Задания 2 (Корутины)")
-        print("=" * 60)
+        self.logger.info("Автомат меню инициализирован")
 
-        yield Event(EventType.ENTER_STATE, {"state": State.MAIN_MENU})
+    def _create_transition_table(self) -> Dict[MenuState, Dict[MenuEvent, MenuState]]:
+        """Создание таблицы переходов автомата."""
+        return {
+            MenuState.INITIAL: {
+                MenuEvent.START: MenuState.MAIN_MENU,
+                MenuEvent.ERROR: MenuState.ERROR,
+                MenuEvent.EXIT: MenuState.EXIT
+            },
+            MenuState.MAIN_MENU: {
+                MenuEvent.SELECT_TASK: MenuState.TASK_SELECTION,
+                MenuEvent.SETTINGS: MenuState.SETTINGS,
+                MenuEvent.EXIT: MenuState.EXIT,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.TASK_SELECTION: {
+                MenuEvent.SELECT_TASK: MenuState.TASK1_MENU,  # После выбора задачи
+                MenuEvent.BACK: MenuState.MAIN_MENU,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.TASK1_MENU: {
+                MenuEvent.SELECT_INPUT: MenuState.INPUT_METHOD,
+                MenuEvent.BACK: MenuState.TASK_SELECTION,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.TASK3_MENU: {
+                MenuEvent.SELECT_INPUT: MenuState.INPUT_METHOD,
+                MenuEvent.BACK: MenuState.TASK_SELECTION,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.TASK8_MENU: {
+                MenuEvent.SELECT_INPUT: MenuState.INPUT_METHOD,
+                MenuEvent.BACK: MenuState.TASK_SELECTION,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.INPUT_METHOD: {
+                MenuEvent.SELECT_MANUAL_INPUT: MenuState.MANUAL_INPUT,
+                MenuEvent.SELECT_AUTO_INPUT: MenuState.AUTO_INPUT,
+                MenuEvent.BACK: MenuState.TASK_SELECTION,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.MANUAL_INPUT: {
+                MenuEvent.INPUT_COMPLETE: MenuState.EXECUTION,
+                MenuEvent.BACK: MenuState.INPUT_METHOD,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.AUTO_INPUT: {
+                MenuEvent.INPUT_COMPLETE: MenuState.EXECUTION,
+                MenuEvent.BACK: MenuState.INPUT_METHOD,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.EXECUTION: {
+                MenuEvent.EXECUTE: MenuState.RESULT,
+                MenuEvent.BACK: MenuState.INPUT_METHOD,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.RESULT: {
+                MenuEvent.BACK: MenuState.MAIN_MENU,
+                MenuEvent.EXIT: MenuState.EXIT,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.SETTINGS: {
+                MenuEvent.SELECT_MAIN: MenuState.LOGGING_SETTINGS,
+                MenuEvent.BACK: MenuState.MAIN_MENU,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.LOGGING_SETTINGS: {
+                MenuEvent.BACK: MenuState.SETTINGS,
+                MenuEvent.ERROR: MenuState.ERROR
+            },
+            MenuState.ERROR: {
+                MenuEvent.BACK: MenuState.MAIN_MENU,
+                MenuEvent.EXIT: MenuState.EXIT
+            },
+            MenuState.EXIT: {}
+        }
 
-        while True:
-            print("\nДоступные опции:")
-            print("1. 📊 Операции с массивами")
-            print("2. 🧮 Операции с матрицами")
-            print("3. ✅ Валидация данных")
-            print("4. ⚡ Алгоритмы (1, 3, 8)")
-            print("5. 🌐 Клиент-сервер")
-            print("6. 🚪 Выход")
-            print("=" * 60)
+    def transition(self, event: MenuEvent, **kwargs) -> bool:
+        """
+        Переход между состояниями.
 
-            # Ждем пользовательский ввод через yield
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите пункт (1-6): "})
+        Args:
+            event: Событие для перехода
+            **kwargs: Дополнительные параметры
 
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
+        Returns:
+            True если переход успешен
+        """
+        try:
+            old_state = self.state
+            new_state = self.transition_table[old_state].get(event)
 
-                if choice == '1':
-                    raise StopAsyncIteration(State.ARRAY_OPS)
-                elif choice == '2':
-                    raise StopAsyncIteration(State.MATRIX_OPS)
-                elif choice == '3':
-                    raise StopAsyncIteration(State.DATA_VALID)
-                elif choice == '4':
-                    raise StopAsyncIteration(State.ALGORITHMS)
-                elif choice == '5':
-                    raise StopAsyncIteration(State.CLIENT_SERVER)
-                elif choice == '6':
-                    raise StopAsyncIteration(State.EXIT)
-                else:
-                    print("⚠ Неверный выбор. Попробуйте снова.")
-                    yield Event(EventType.ERROR, {"message": "Неверный ввод"})
+            if new_state is None:
+                self.logger.warning(f"Недопустимый переход: {old_state} -> {event}")
+                return False
 
-    async def array_ops_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние операций с массивами."""
-        print("\n" + "=" * 60)
-        print("ОПЕРАЦИИ С МАССИВАМИ (Корутины)")
-        print("=" * 60)
+            # Обновление контекста
+            if kwargs:
+                self.context.update(kwargs)
 
-        yield Event(EventType.ENTER_STATE, {"state": State.ARRAY_OPS})
+            # Логирование перехода
+            self.logger.debug(f"Переход состояния: {old_state} -> {new_state} (событие: {event})")
 
-        while True:
-            print("\nОперации с массивами:")
-            print("1. Создать массив")
-            print("2. Суммировать массивы")
-            print("3. Найти общие элементы")
-            print("4. 🏠 Вернуться в главное меню")
-            print("=" * 60)
+            self.state = new_state
+            return True
 
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите операцию (1-4): "})
+        except Exception as e:
+            self.logger.error(f"Ошибка перехода состояния: {e}")
+            self.state = MenuState.ERROR
+            self.context['error_message'] = str(e)
+            return False
 
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
+    async def run(self):
+        """Запуск автомата."""
+        self.logger.info("Запуск автомата меню")
 
-                if choice == '1':
-                    # Корутина создания массива
-                    await self.create_array_coroutine()
-                elif choice == '2':
-                    # Корутина суммирования
-                    await self.sum_arrays_coroutine()
-                elif choice == '3':
-                    # Корутина поиска общих элементов
-                    await self.common_elements_coroutine()
-                elif choice == '4':
-                    raise StopAsyncIteration(State.MAIN_MENU)
-                else:
-                    print("Неверный выбор")
+        # Начальный переход
+        self.transition(MenuEvent.START)
 
-    async def matrix_ops_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние операций с матрицами."""
-        print("\n" + "=" * 60)
-        print("ОПЕРАЦИИ С МАТРИЦАМИ (Корутины)")
-        print("=" * 60)
-
-        yield Event(EventType.ENTER_STATE, {"state": State.MATRIX_OPS})
-
-        while True:
-            print("\nОперации с матрицами:")
-            print("1. Создать матрицу")
-            print("2. Повернуть матрицу")
-            print("3. Транспонировать матрицу")
-            print("4. 🏠 Вернуться в главное меню")
-            print("=" * 60)
-
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите операцию (1-4): "})
-
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
-
-                if choice == '1':
-                    await self.create_matrix_coroutine()
-                elif choice == '2':
-                    await self.rotate_matrix_coroutine()
-                elif choice == '3':
-                    await self.transpose_matrix_coroutine()
-                elif choice == '4':
-                    raise StopAsyncIteration(State.MAIN_MENU)
-                else:
-                    print("Неверный выбор")
-
-    async def data_valid_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние валидации данных."""
-        print("\n" + "=" * 60)
-        print("ВАЛИДАЦИЯ ДАННЫХ (Корутины)")
-        print("=" * 60)
-
-        yield Event(EventType.ENTER_STATE, {"state": State.DATA_VALID})
-
-        while True:
-            print("\nВалидация данных:")
-            print("1. Валидация числа")
-            print("2. Валидация массива")
-            print("3. Валидация матрицы")
-            print("4. 🏠 Вернуться в главное меню")
-            print("=" * 60)
-
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите тип (1-4): "})
-
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
-
-                if choice == '1':
-                    await self.validate_number_coroutine()
-                elif choice == '2':
-                    await self.validate_array_coroutine()
-                elif choice == '3':
-                    await self.validate_matrix_coroutine()
-                elif choice == '4':
-                    raise StopAsyncIteration(State.MAIN_MENU)
-                else:
-                    print("Неверный выбор")
-
-    async def algorithms_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние алгоритмов."""
-        print("\n" + "=" * 60)
-        print("АЛГОРИТМЫ (Корутины)")
-        print("=" * 60)
-
-        yield Event(EventType.ENTER_STATE, {"state": State.ALGORITHMS})
-
-        while True:
-            print("\nДоступные алгоритмы:")
-            print("1. Алгоритм 1: Сумма массивов")
-            print("2. Алгоритм 3: Поворот матрицы")
-            print("3. Алгоритм 8: Общие числа")
-            print("4. Запустить все асинхронно")
-            print("5. 🏠 Вернуться в главное меню")
-            print("=" * 60)
-
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите алгоритм (1-5): "})
-
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
-
-                if choice == '1':
-                    await self.algorithm1_coroutine()
-                elif choice == '2':
-                    await self.algorithm3_coroutine()
-                elif choice == '3':
-                    await self.algorithm8_coroutine()
-                elif choice == '4':
-                    # Запуск всех алгоритмов асинхронно
-                    await self.run_all_algorithms_async()
-                elif choice == '5':
-                    raise StopAsyncIteration(State.MAIN_MENU)
-                else:
-                    print("Неверный выбор")
-
-    async def client_server_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние клиент-сервер."""
-        print("\n" + "=" * 60)
-        print("КЛИЕНТ-СЕРВЕР (Корутины)")
-        print("=" * 60)
-
-        yield Event(EventType.ENTER_STATE, {"state": State.CLIENT_SERVER})
-
-        while True:
-            print("\nКлиент-серверные операции:")
-            print("1. Запустить сервер (демо)")
-            print("2. Запустить клиента (демо)")
-            print("3. Тест многопоточности")
-            print("4. 🏠 Вернуться в главное меню")
-            print("=" * 60)
-
-            choice_event = yield Event(EventType.USER_INPUT, {"prompt": "Выберите действие (1-4): "})
-
-            if choice_event.type == EventType.USER_INPUT:
-                choice = choice_event.data
-
-                if choice == '1':
-                    await self.start_server_demo()
-                elif choice == '2':
-                    await self.start_client_demo()
-                elif choice == '3':
-                    await self.thread_test_coroutine()
-                elif choice == '4':
-                    raise StopAsyncIteration(State.MAIN_MENU)
-                else:
-                    print("Неверный выбор")
-
-    async def exit_state(self) -> AsyncGenerator[Event, None]:
-        """Состояние выхода."""
-        print("\n" + "=" * 60)
-        print("ВЫХОД ИЗ СИСТЕМЫ")
-        print("=" * 60)
-
-        yield Event(EventType.ENTER_STATE, {"state": State.EXIT})
-
-        print("Завершение работы...")
-        await asyncio.sleep(1.0)
-
-        # Сигнал завершения
-        yield Event(EventType.COMPLETE, {"message": "System shutdown"})
-
-        # Останавливаем автомат
-        self.running = False
-        raise StopAsyncIteration(State.EXIT)
-
-    # ========== ВСПОМОГАТЕЛЬНЫЕ КОРУТИНЫ ==========
-
-    async def create_array_coroutine(self):
-        """Корутина создания массива."""
-        print("\n[Создание массива]")
-
-        size_event = yield Event(EventType.USER_INPUT, {"prompt": "Введите размер массива: "})
-
-        if size_event.type == EventType.USER_INPUT:
+        # Основной цикл автомата
+        while self.state != MenuState.EXIT:
             try:
-                size = int(size_event.data)
-                print(f"Создание массива из {size} элементов...")
-                yield Event(EventType.ENTER_STATE, {"action": "creating_array"})
+                # Получаем корутину для текущего состояния
+                coroutine = self.state_coroutines.get(self.state)
 
-                await asyncio.sleep(0.5)
+                if coroutine:
+                    # Выполняем корутину состояния
+                    event = await coroutine()
 
-                array = list(range(1, size + 1))
-                print(f"✓ Создан массив: {array}")
+                    # Обрабатываем возвращенное событие
+                    if event:
+                        self.transition(event)
+                else:
+                    self.logger.error(f"Нет корутины для состояния: {self.state}")
+                    self.transition(MenuEvent.ERROR,
+                                  error_message=f"Неизвестное состояние: {self.state}")
 
-                yield Event(EventType.COMPLETE, {"result": array})
-
-            except ValueError:
-                print("✗ Ошибка: введите число")
-                yield Event(EventType.ERROR, {"message": "Invalid input"})
-
-    async def sum_arrays_coroutine(self):
-        """Корутина суммирования массивов."""
-        print("\n[Суммирование массивов]")
-
-        arr1_event = yield Event(EventType.USER_INPUT, {
-            "prompt": "Введите первый массив (через запятую): "
-        })
-
-        if arr1_event.type == EventType.USER_INPUT:
-            try:
-                arr1 = [int(x.strip()) for x in arr1_event.data.split(',')]
-
-                arr2_event = yield Event(EventType.USER_INPUT, {
-                    "prompt": "Введите второй массив (через запятую): "
-                })
-
-                if arr2_event.type == EventType.USER_INPUT:
-                    arr2 = [int(x.strip()) for x in arr2_event.data.split(',')]
-
-                    print("Вычисление суммы...")
-                    yield Event(EventType.ENTER_STATE, {"action": "calculating_sum"})
-
-                    await asyncio.sleep(0.3)
-
-                    if len(arr1) == len(arr2):
-                        result = [a + b for a, b in zip(arr1, arr2)]
-                        print(f"✓ Результат: {arr1} + {arr2} = {result}")
-                        yield Event(EventType.COMPLETE, {"result": result})
-                    else:
-                        print("✗ Ошибка: массивы разной длины")
-                        yield Event(EventType.ERROR, {"message": "Arrays length mismatch"})
-
-            except ValueError:
-                print("✗ Ошибка: введите числа через запятую")
-                yield Event(EventType.ERROR, {"message": "Invalid input format"})
-
-    async def common_elements_coroutine(self):
-        """Корутина поиска общих элементов."""
-        print("\n[Поиск общих элементов]")
-
-        arr1_event = yield Event(EventType.USER_INPUT, {
-            "prompt": "Первый массив (через запятую): "
-        })
-
-        if arr1_event.type == EventType.USER_INPUT:
-            arr2_event = yield Event(EventType.USER_INPUT, {
-                "prompt": "Второй массив (через запятую): "
-            })
-
-            if arr2_event.type == EventType.USER_INPUT:
-                try:
-                    arr1 = [int(x.strip()) for x in arr1_event.data.split(',')]
-                    arr2 = [int(x.strip()) for x in arr2_event.data.split(',')]
-
-                    print("Поиск общих элементов...")
-                    yield Event(EventType.ENTER_STATE, {"action": "finding_common"})
-
-                    await asyncio.sleep(0.4)
-
-                    common = list(set(arr1) & set(arr2))
-                    print(f"✓ Общие элементы: {common}")
-
-                    yield Event(EventType.COMPLETE, {"result": common})
-
-                except ValueError:
-                    print("✗ Ошибка ввода")
-                    yield Event(EventType.ERROR, {"message": "Input error"})
-
-    async def create_matrix_coroutine(self):
-        """Корутина создания матрицы."""
-        print("\n[Создание матрицы]")
-
-        rows_event = yield Event(EventType.USER_INPUT, {"prompt": "Количество строк: "})
-
-        if rows_event.type == EventType.USER_INPUT:
-            cols_event = yield Event(EventType.USER_INPUT, {"prompt": "Количество столбцов: "})
-
-            if cols_event.type == EventType.USER_INPUT:
-                try:
-                    rows = int(rows_event.data)
-                    cols = int(cols_event.data)
-
-                    print(f"Создание матрицы {rows}x{cols}...")
-                    yield Event(EventType.ENTER_STATE, {"action": "creating_matrix"})
-
-                    await asyncio.sleep(0.5)
-
-                    matrix = [[i * cols + j + 1 for j in range(cols)] for i in range(rows)]
-                    print("✓ Матрица создана:")
-                    for row in matrix:
-                        print(f"  {row}")
-
-                    yield Event(EventType.COMPLETE, {"result": matrix})
-
-                except ValueError:
-                    print("✗ Ошибка: введите числа")
-                    yield Event(EventType.ERROR, {"message": "Invalid input"})
-
-    async def rotate_matrix_coroutine(self):
-        """Корутина поворота матрицы."""
-        print("\n[Поворот матрицы]")
-
-        matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-        print("Исходная матрица:")
-        for row in matrix:
-            print(f"  {row}")
-
-        direction_event = yield Event(EventType.USER_INPUT, {
-            "prompt": "Направление (1-по часовой, 2-против): "
-        })
-
-        if direction_event.type == EventType.USER_INPUT:
-            print("Поворот...")
-            yield Event(EventType.ENTER_STATE, {"action": "rotating_matrix"})
-
-            await asyncio.sleep(0.6)
-
-            n = len(matrix)
-            if direction_event.data == '1':
-                rotated = [[matrix[n - 1 - j][i] for j in range(n)] for i in range(n)]
-                direction = "по часовой стрелке"
-            else:
-                rotated = [[matrix[j][n - 1 - i] for j in range(n)] for i in range(n)]
-                direction = "против часовой стрелки"
-
-            print(f"✓ Матрица повернута {direction}:")
-            for row in rotated:
-                print(f"  {row}")
-
-            yield Event(EventType.COMPLETE, {"result": rotated})
-
-    async def validate_number_coroutine(self):
-        """Корутина валидации числа."""
-        print("\n[Валидация числа]")
-
-        num_event = yield Event(EventType.USER_INPUT, {"prompt": "Введите число: "})
-
-        if num_event.type == EventType.USER_INPUT:
-            print("Проверка...")
-            yield Event(EventType.ENTER_STATE, {"action": "validating_number"})
-
-            await asyncio.sleep(0.2)
-
-            text = num_event.data
-            if text.replace('-', '').isdigit():
-                print(f"✓ Число '{text}' валидно")
-                yield Event(EventType.COMPLETE, {"valid": True})
-            else:
-                print(f"✗ '{text}' не является числом")
-                yield Event(EventType.ERROR, {"valid": False})
-
-    async def validate_array_coroutine(self):
-        """Корутина валидации массива."""
-        print("\n[Валидация массива]")
-
-        arr_event = yield Event(EventType.USER_INPUT, {
-            "prompt": "Введите массив (через запятую): "
-        })
-
-        if arr_event.type == EventType.USER_INPUT:
-            print("Проверка...")
-            yield Event(EventType.ENTER_STATE, {"action": "validating_array"})
-
-            await asyncio.sleep(0.3)
-
-            try:
-                array = [int(x.strip()) for x in arr_event.data.split(',')]
-                print(f"✓ Массив валиден: {array}")
-                yield Event(EventType.COMPLETE, {"valid": True, "array": array})
-            except ValueError:
-                print("✗ Невалидный массив")
-                yield Event(EventType.ERROR, {"valid": False})
-
-    async def validate_matrix_coroutine(self):
-        """Корутина валидации матрицы."""
-        print("\n[Валидация матрицы]")
-
-        matrix_event = yield Event(EventType.USER_INPUT, {
-            "prompt": "Введите матрицу (строки через ';', элементы через ','): "
-        })
-
-        if matrix_event.type == EventType.USER_INPUT:
-            print("Проверка...")
-            yield Event(EventType.ENTER_STATE, {"action": "validating_matrix"})
-
-            await asyncio.sleep(0.4)
-
-            try:
-                rows = matrix_event.data.split(';')
-                matrix = []
-                for i, row in enumerate(rows):
-                    elements = [int(x.strip()) for x in row.split(',')]
-                    matrix.append(elements)
-
-                    if i > 0 and len(elements) != len(matrix[0]):
-                        raise ValueError("Разные длины строк")
-
-                print(f"✓ Матрица валидна, размер: {len(matrix)}x{len(matrix[0])}")
-                yield Event(EventType.COMPLETE, {"valid": True, "matrix": matrix})
-
+            except asyncio.CancelledError:
+                self.logger.info("Автомат отменен")
+                break
             except Exception as e:
-                print(f"✗ Невалидная матрица: {e}")
-                yield Event(EventType.ERROR, {"valid": False})
+                self.logger.error(f"Ошибка в автомате: {e}")
+                self.transition(MenuEvent.ERROR, error_message=str(e))
 
-    async def algorithm1_coroutine(self):
-        """Корутина алгоритма 1 (сумма массивов)."""
-        print("\n[Алгоритм 1: Сумма массивов]")
+        self.logger.info("Автомат завершен")
 
-        yield Event(EventType.ENTER_STATE, {"algorithm": "sum_arrays"})
+    # ============================================================================
+    # КОРУТИНЫ СОСТОЯНИЙ
+    # ============================================================================
 
-        print("Выполнение алгоритма...")
+    async def _state_initial(self) -> Optional[MenuEvent]:
+        """Корутина начального состояния."""
+        print("\n" + "=" * 60)
+        print("АВТОМАТНОЕ ПРОГРАММИРОВАНИЕ - МЕНЮ НА КОРУТИНАХ")
+        print("=" * 60)
 
-        steps = ["Инициализация", "Проверка размеров", "Вычисление", "Формирование результата"]
+        await asyncio.sleep(0.5)  # Небольшая задержка для эффекта
+        return MenuEvent.START
 
-        for step in steps:
-            print(f"  {step}...")
-            await asyncio.sleep(0.3)
-            yield Event(EventType.ENTER_STATE, {"step": step})
+    async def _state_main_menu(self) -> Optional[MenuEvent]:
+        """Корутина главного меню."""
+        print("\n" + "=" * 60)
+        print("ГЛАВНОЕ МЕНЮ")
+        print("=" * 60)
 
-        result = [1 + 4, 2 + 5, 3 + 6]
-        print(f"✓ Результат: [1,2,3] + [4,5,6] = {result}")
-
-        yield Event(EventType.COMPLETE, {"result": result})
-
-    async def algorithm3_coroutine(self):
-        """Корутина алгоритма 3 (поворот матрицы)."""
-        print("\n[Алгоритм 3: Поворот матрицы]")
-
-        yield Event(EventType.ENTER_STATE, {"algorithm": "rotate_matrix"})
-
-        print("Выполнение алгоритма...")
-
-        steps = ["Чтение матрицы", "Определение размеров", "Вычисление поворота", "Вывод результата"]
-
-        for step in steps:
-            print(f"  {step}...")
-            await asyncio.sleep(0.4)
-            yield Event(EventType.ENTER_STATE, {"step": step})
-
-        print("✓ Матрица повернута успешно")
-
-        yield Event(EventType.COMPLETE, {"result": "matrix_rotated"})
-
-    async def algorithm8_coroutine(self):
-        """Корутина алгоритма 8 (общие числа)."""
-        print("\n[Алгоритм 8: Общие числа]")
-
-        yield Event(EventType.ENTER_STATE, {"algorithm": "common_numbers"})
-
-        print("Выполнение алгоритма...")
-
-        steps = ["Чтение массивов", "Создание множеств", "Пересечение", "Сортировка результата"]
-
-        for step in steps:
-            print(f"  {step}...")
-            await asyncio.sleep(0.35)
-            yield Event(EventType.ENTER_STATE, {"step": step})
-
-        result = [2, 3, 4]
-        print(f"✓ Найдены общие числа: {result}")
-
-        yield Event(EventType.COMPLETE, {"result": result})
-
-    async def run_all_algorithms_async(self):
-        """Асинхронный запуск всех алгоритмов."""
-        print("\n[Асинхронный запуск всех алгоритмов]")
-
-        tasks = [
-            asyncio.create_task(self._run_algorithm_with_progress("Алгоритм 1", 1.0)),
-            asyncio.create_task(self._run_algorithm_with_progress("Алгоритм 3", 1.5)),
-            asyncio.create_task(self._run_algorithm_with_progress("Алгоритм 8", 1.2)),
+        options = [
+            "1. Выбор задания",
+            "2. Настройки",
+            "3. Выход"
         ]
 
-        print("Запущено 3 алгоритма параллельно...")
+        for option in options:
+            print(option)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        print("\n✓ Все алгоритмы завершены!")
-        for i, result in enumerate(results, 1):
-            status = 'Успех' if not isinstance(result, Exception) else 'Ошибка'
-            print(f"  Алгоритм {i}: {status}")
-
-    async def _run_algorithm_with_progress(self, name: str, duration: float):
-        """Вспомогательная корутина."""
-        print(f"  {name} запущен...")
-
-        steps = int(duration / 0.3)
-        for i in range(steps):
-            await asyncio.sleep(0.3)
-            print(f"    {name}: шаг {i + 1}/{steps}")
-
-        print(f"  {name}: завершен")
-        return f"{name}_done"
-
-    async def start_server_demo(self):
-        """Демо запуска сервера."""
-        print("\n[Демо сервера]")
-
-        print("Запуск сервера...")
-        yield Event(EventType.ENTER_STATE, {"action": "starting_server"})
-
-        await asyncio.sleep(1.0)
-
-        print("✓ Сервер запущен на localhost:8888")
-        print("  Ожидание подключений...")
-
-        for i in range(3):
-            await asyncio.sleep(0.5)
-            print(f"  Принято подключение #{i + 1}")
-
-        yield Event(EventType.COMPLETE, {"status": "server_running"})
-
-    async def start_client_demo(self):
-        """Демо запуска клиента."""
-        print("\n[Демо клиента]")
-
-        print("Подключение к серверу...")
-        yield Event(EventType.ENTER_STATE, {"action": "connecting_client"})
-
-        await asyncio.sleep(0.7)
-
-        print("✓ Клиент подключен")
-        print("  Отправка запросов...")
-
-        requests = ["GENERATE_ARRAY", "GENERATE_MATRIX", "SUM_ARRAYS"]
-        for req in requests:
-            await asyncio.sleep(0.4)
-            print(f"  Отправлен запрос: {req}")
-            await asyncio.sleep(0.2)
-            print(f"  Получен ответ")
-
-        yield Event(EventType.COMPLETE, {"status": "client_connected"})
-
-    async def thread_test_coroutine(self):
-        """Корутина теста многопоточности."""
-        print("\n[Тест многопоточности]")
-
-        print("Запуск теста...")
-        yield Event(EventType.ENTER_STATE, {"action": "thread_test"})
-
-        async def mock_request(request_id: int):
-            await asyncio.sleep(0.5 + request_id * 0.1)
-            return f"Request_{request_id}_done"
-
-        print("Запуск 5 параллельных запросов...")
-
-        tasks = [mock_request(i) for i in range(5)]
-        start_time = time.time()
-
-        results = await asyncio.gather(*tasks)
-
-        elapsed = time.time() - start_time
-
-        print(f"✓ Все запросы завершены за {elapsed:.2f}с")
-        print(f"  Параллельность: {(0.5 * 5) / elapsed:.2f}x")
-
-        yield Event(EventType.COMPLETE, {"results": results, "time": elapsed})
-
-    async def event_loop(self):
-        """Основной цикл обработки событий."""
-        print("\n" + "=" * 60)
-        print("АВТОМАТ НА КОРУТИНАХ - ЗАПУСК")
-        print("=" * 60)
-
-        self.running = True
-        next_state = State.IDLE
-
-        while self.running:
-            handler = self.state_handlers.get(next_state)
-
-            if not handler:
-                print(f"Ошибка: нет обработчика для состояния {next_state}")
-                break
-
-            if next_state != self.current_state:
-                self.state_history.append((self.current_state, next_state))
-                self.current_state = next_state
-                print(f"\n[Переход] → {self.current_state.value}")
-
-            coroutine = handler()
-            self.current_coroutine = coroutine
-
-            try:
-                event = await coroutine.__anext__()
-
-                while True:
-                    if event.type == EventType.USER_INPUT:
-                        prompt = event.data.get('prompt', '> ')
-                        user_input = await self.get_user_input(prompt)
-
-                        event = await coroutine.asend(
-                            Event(EventType.USER_INPUT, user_input)
-                        )
-
-                    elif event.type in [EventType.ENTER_STATE, EventType.EXIT_STATE,
-                                        EventType.COMPLETE, EventType.ERROR]:
-                        # Просто логируем и получаем следующее событие
-                        event = await coroutine.__anext__()
-
-                    else:
-                        event = await coroutine.__anext__()
-
-            except StopAsyncIteration as e:
-                # Получаем следующее состояние из StopAsyncIteration
-                next_state = e.value if hasattr(e, 'value') else State.MAIN_MENU
-
-            except Exception as e:
-                print(f"Ошибка в корутине: {e}")
-                next_state = State.MAIN_MENU
-
-            if next_state == State.EXIT:
-                self.running = False
-
-    async def get_user_input(self, prompt: str) -> str:
-        """Асинхронное получение пользовательского ввода."""
-        # Используем asyncio.to_thread для неблокирующего ввода
-        return await asyncio.to_thread(input, prompt)
-
-    def run(self):
-        """Запуск автомата."""
         try:
-            asyncio.run(self.event_loop())
-        except KeyboardInterrupt:
-            print("\n\nПрограмма прервана пользователем")
-        finally:
-            print("\n" + "=" * 60)
-            print("АВТОМАТ ЗАВЕРШИЛ РАБОТУ")
-            print(f"История переходов: {self.state_history}")
-            print("=" * 60)
+            choice = await self._async_input("\nВыберите пункт: ")
 
-
-class AsyncMenuManager:
-    """Менеджер асинхронного меню."""
-
-    def __init__(self):
-        self.state_machine = CoroutineStateMachine()
-
-    def start(self):
-        """Запуск меню."""
-        print("\n" + "=" * 60)
-        print("АВТОМАТНОЕ ПРОГРАММИРОВАНИЕ ЧЕРЕЗ КОРУТИНЫ")
-        print("Реализация меню через асинхронные конечные автоматы")
-        print("=" * 60)
-
-        self.state_machine.run()
-
-
-# Упрощенная версия для тестирования
-class SimpleCoroutineMenu:
-    """Упрощенная версия меню на корутинах."""
-
-    async def main_menu(self):
-        """Упрощенное главное меню."""
-        print("\n" + "=" * 60)
-        print("ПРОСТОЕ АВТОМАТНОЕ МЕНЮ (Корутины)")
-        print("=" * 60)
-
-        while True:
-            print("\n1. Операции с массивами")
-            print("2. Операции с матрицами")
-            print("3. Выход")
-
-            choice = await asyncio.to_thread(input, "Выберите: ")
-
-            if choice == '1':
-                await self.array_operations()
-            elif choice == '2':
-                await self.matrix_operations()
-            elif choice == '3':
-                print("\nВыход...")
-                break
+            if choice == "1":
+                return MenuEvent.SELECT_TASK # Переход к выбору задания
+            elif choice == "2":
+                return MenuEvent.SETTINGS # Переход к настройкам
+            elif choice == "3":
+                return MenuEvent.EXIT   # Завершение работы
             else:
-                print("Неверный выбор")
+                print("Неверный выбор!")
+                return None
 
-    async def array_operations(self):
-        """Операции с массивами."""
-        print("\n--- Операции с массивами ---")
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            return MenuEvent.ERROR
 
-        print("1. Создать массив")
-        print("2. Суммировать массивы")
+    async def _state_task_selection(self) -> Optional[MenuEvent]:
+        """Корутина выбора задания."""
+        print("\n" + "=" * 60)
+        print("ВЫБОР ЗАДАНИЯ")
+        print("=" * 60)
+
+        tasks = {
+            "1": ("Алгоритм 1: Сумма массивов", MenuState.TASK1_MENU),
+            "2": ("Алгоритм 3: Поворот матрицы", MenuState.TASK3_MENU),
+            "3": ("Алгоритм 8: Поиск общих чисел", MenuState.TASK8_MENU)
+        }
+
+        for key, (desc, _) in tasks.items():
+            print(f"{key}. {desc}")
+        print("4. Назад")
+
+        try:
+            choice = await self._async_input("\nВыберите задание: ")
+
+            if choice == "1":
+                self.context['selected_task'] = 1
+                return MenuEvent.SELECT_TASK
+            elif choice == "2":
+                self.context['selected_task'] = 3
+                return MenuEvent.SELECT_TASK
+            elif choice == "3":
+                self.context['selected_task'] = 8
+                return MenuEvent.SELECT_TASK
+            elif choice == "4":
+                return MenuEvent.BACK
+            else:
+                print("Неверный выбор!")
+                return None
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            return MenuEvent.ERROR
+
+    async def _state_task1_menu(self) -> Optional[MenuEvent]:
+        """Корутина меню задания 1."""
+        print("\n" + "=" * 60)
+        print("АЛГОРИТМ 1: СУММА МАССИВОВ С РАЗНОЙ СОРТИРОВКОЙ")
+        print("=" * 60)
+
+        print("\nОписание:")
+        print("Входные данные: 2 массива одинакового размера")
+        print("1. Первый массив → сортировка по убыванию")
+        print("2. Второй массив → сортировка по возрастанию")
+        print("3. Если элементы равны → результат 0, иначе сумма")
+        print("4. Результат → сортировка по возрастанию")
+
+        print("\n1. Продолжить")
+        print("2. Назад")
+
+        choice = await self._async_input("\nВыберите: ")
+
+        if choice == "1":
+            return MenuEvent.SELECT_INPUT
+        elif choice == "2":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_task3_menu(self) -> Optional[MenuEvent]:
+        """Корутина меню задания 3 (поворот матрицы)."""
+        print("\n" + "=" * 60)
+        print("АЛГОРИТМ 3: ПОВОРОТ МАТРИЦЫ НА 90 ГРАДУСОВ")
+        print("=" * 60)
+
+        print("\nОписание:")
+        print("Входные данные: матрица N на M")
+        print("Требуется повернуть матрицу на 90 градусов")
+        print("по часовой или против часовой стрелки")
+
+        print("\n1. Продолжить")
+        print("2. Назад")
+
+        choice = await self._async_input("\nВыберите: ")
+
+        if choice == "1":
+            return MenuEvent.SELECT_INPUT
+        elif choice == "2":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_task8_menu(self) -> Optional[MenuEvent]:
+        """Корутина меню задания 8."""
+        print("\n" + "=" * 60)
+        print("АЛГОРИТМ 8: ПОИСК ОБЩИХ ЧИСЕЛ")
+        print("=" * 60)
+
+        print("\nОписание:")
+        print("Входные данные: 2 массива с числами")
+        print("Число считается общим, если:")
+        print("1. Оно входит в оба массива")
+        print("2. Его перевернутая версия входит в другой массив")
+
+        print("\n1. Продолжить")
+        print("2. Назад")
+
+        choice = await self._async_input("\nВыберите: ")
+
+        if choice == "1":
+            return MenuEvent.SELECT_INPUT
+        elif choice == "2":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_input_method(self) -> Optional[MenuEvent]:
+        """Корутина выбора способа ввода."""
+        print("\n" + "=" * 40)
+        print("ВЫБОР СПОСОБА ВВОДА")
+        print("=" * 40)
+
+        print("\n1. Ручной ввод")
+        print("2. Автоматическая генерация")
         print("3. Назад")
 
-        choice = await asyncio.to_thread(input, "Выберите: ")
+        choice = await self._async_input("\nВыберите способ: ")
 
-        if choice == '1':
-            size = int(await asyncio.to_thread(input, "Размер: "))
-            array = list(range(size))
-            print(f"Массив: {array}")
-        elif choice == '2':
-            print("Суммирование массивов...")
-            arr1 = [1, 2, 3]
-            arr2 = [4, 5, 6]
-            result = [a + b for a, b in zip(arr1, arr2)]
-            print(f"Результат: {result}")
+        if choice == "1":
+            print("Выбран ручной ввод")
+            return MenuEvent.SELECT_MANUAL_INPUT
+        elif choice == "2":
+            print("Выбрана автоматическая генерация")
+            return MenuEvent.SELECT_AUTO_INPUT
+        elif choice == "3":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
 
-    async def matrix_operations(self):
-        """Операции с матрицами."""
-        print("\n--- Операции с матрицами ---")
+    async def _state_manual_input(self) -> Optional[MenuEvent]:
+        """Корутина ручного ввода."""
+        task_num = self.context.get('selected_task', 1)
 
-        print("1. Создать матрицу")
-        print("2. Повернуть матрицу")
+        print("\n" + "=" * 40)
+        print(f"РУЧНОЙ ВВОД ДЛЯ ЗАДАНИЯ {task_num}")
+        print("=" * 40)
+
+        try:
+            if task_num == 1:
+                # Ввод двух массивов
+                print("\n--- Массив 1 ---")
+                arr1_str = await self._async_input("Введите числа через пробел: ")
+                arr1 = list(map(float, arr1_str.split()))
+
+                print("\n--- Массив 2 ---")
+                print(f"Должен быть такой же размер ({len(arr1)})")
+                arr2_str = await self._async_input("Введите числа через пробел: ")
+                arr2 = list(map(float, arr2_str.split()))
+
+                if len(arr1) != len(arr2):
+                    print("Ошибка: массивы разного размера!")
+                    return MenuEvent.ERROR
+
+                self.context['task_data'] = (arr1, arr2)
+                print(f"\n✓ Массивы сохранены: {len(arr1)} элементов")
+
+            elif task_num == 3:
+                # Ввод матрицы
+                rows = int(await self._async_input("Количество строк: "))
+                cols = int(await self._async_input("Количество столбцов: "))
+
+                matrix = []
+                print("\nВведите матрицу по строкам:")
+                for i in range(rows):
+                    row_str = await self._async_input(f"Строка {i+1}: ")
+                    row = list(map(float, row_str.split()))
+                    if len(row) != cols:
+                        print(f"Ошибка: нужно {cols} чисел!")
+                        return MenuEvent.ERROR
+                    matrix.append(row)
+
+                self.context['task_data'] = matrix
+                print(f"\n✓ Матрица сохранена: {rows}x{cols}")
+
+            elif task_num == 8:
+                # Ввод двух массивов для поиска общих чисел
+                print("\n--- Массив 1 ---")
+                arr1_str = await self._async_input("Введите числа через пробел: ")
+                arr1 = list(map(int, arr1_str.split()))
+
+                print("\n--- Массив 2 ---")
+                arr2_str = await self._async_input("Введите числа через пробел: ")
+                arr2 = list(map(int, arr2_str.split()))
+
+                self.context['task_data'] = (arr1, arr2)
+                print(f"\n✓ Массивы сохранены: {len(arr1)} и {len(arr2)} элементов")
+
+            return MenuEvent.INPUT_COMPLETE
+
+        except ValueError as e:
+            print(f"Ошибка ввода чисел: {e}")
+            return MenuEvent.ERROR
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            return MenuEvent.ERROR
+
+    async def _state_auto_input(self) -> Optional[MenuEvent]:
+        """Корутина автоматического ввода."""
+        task_num = self.context.get('selected_task', 1)
+
+        print("\n" + "=" * 40)
+        print(f"АВТОМАТИЧЕСКИЙ ВВОД ДЛЯ ЗАДАНИЯ {task_num}")
+        print("=" * 40)
+
+        try:
+            # Имитация задержки генерации
+            print("Генерация данных...")
+            await asyncio.sleep(1)
+
+            if task_num == 1:
+                # Генерация двух массивов
+                size = random.randint(5, 10)
+                arr1 = [random.randint(1, 100) for _ in range(size)]
+                arr2 = [random.randint(1, 100) for _ in range(size)]
+
+                self.context['task_data'] = (arr1, arr2)
+                print(f"\n✓ Сгенерированы 2 массива по {size} элементов")
+                print(f"  Массив 1: {arr1}")
+                print(f"  Массив 2: {arr2}")
+
+            elif task_num == 3:
+                # Генерация матрицы
+                rows = random.randint(3, 6)
+                cols = random.randint(3, 6)
+                matrix = [[random.randint(1, 20) for _ in range(cols)]
+                         for _ in range(rows)]
+
+                self.context['task_data'] = matrix
+                print(f"\n✓ Сгенерирована матрица {rows}x{cols}")
+                for i, row in enumerate(matrix):
+                    print(f"  Строка {i+1}: {row}")
+
+            elif task_num == 8:
+                # Генерация массивов с возможными перевернутыми числами
+                size = random.randint(5, 8)
+                arr1 = []
+                arr2 = []
+
+                # Генерируем некоторые перевернутые пары
+                for _ in range(size):
+                    num = random.randint(10, 99)
+                    arr1.append(num)
+                    # С вероятностью 30% добавляем перевернутое число во второй массив
+                    if random.random() < 0.3:
+                        arr2.append(int(str(num)[::-1]))
+                    else:
+                        arr2.append(random.randint(10, 99))
+
+                self.context['task_data'] = (arr1, arr2)
+                print(f"\n✓ Сгенерированы 2 массива по {size} элементов")
+                print(f"  Массив 1: {arr1}")
+                print(f"  Массив 2: {arr2}")
+                print("  (некоторые числа могут быть перевернутыми версиями)")
+
+            return MenuEvent.INPUT_COMPLETE
+
+        except Exception as e:
+            print(f"Ошибка генерации: {e}")
+            return MenuEvent.ERROR
+
+    async def _state_execution(self) -> Optional[MenuEvent]:
+        """Корутина выполнения алгоритма."""
+        task_num = self.context.get('selected_task', 1)
+        task_data = self.context.get('task_data')
+
+        print("\n" + "=" * 60)
+        print(f"ВЫПОЛНЕНИЕ АЛГОРИТМА {task_num}")
+        print("=" * 60)
+
+        if not task_data:
+            print("Ошибка: данные не введены!")
+            return MenuEvent.ERROR
+
+        try:
+            print("Выполнение алгоритма...")
+
+            # Имитация длительных вычислений
+            await asyncio.sleep(2)
+
+            # Здесь должна быть реальная логика алгоритма
+            # Для демонстрации просто создаем заглушку
+
+            if task_num == 1:
+                arr1, arr2 = task_data
+                # Имитация алгоритма 1
+                result = [a + b if a != b else 0 for a, b in zip(
+                    sorted(arr1, reverse=True),
+                    sorted(arr2)
+                )]
+                result = sorted(result)
+
+            elif task_num == 3:
+                matrix = task_data
+                # Имитация поворота матрицы (по часовой стрелке)
+                rows = len(matrix)
+                cols = len(matrix[0])
+                result = [[0 for _ in range(rows)] for _ in range(cols)]
+                for i in range(rows):
+                    for j in range(cols):
+                        result[j][rows - 1 - i] = matrix[i][j]
+
+            elif task_num == 8:
+                arr1, arr2 = task_data
+                # Имитация поиска общих чисел
+                common = set(arr1) & set(arr2)
+                result = list(common)
+
+            self.context['task_result'] = result
+            print("✓ Алгоритм выполнен успешно!")
+
+            return MenuEvent.EXECUTE
+
+        except Exception as e:
+            print(f"Ошибка выполнения: {e}")
+            return MenuEvent.ERROR
+
+    async def _state_result(self) -> Optional[MenuEvent]:
+        """Корутина отображения результата."""
+        task_num = self.context.get('selected_task', 1)
+        task_data = self.context.get('task_data')
+        result = self.context.get('task_result')
+
+        print("\n" + "=" * 60)
+        print(f"РЕЗУЛЬТАТ ВЫПОЛНЕНИЯ АЛГОРИТМА {task_num}")
+        print("=" * 60)
+
+        print("\nИсходные данные:")
+        if task_num == 1:
+            arr1, arr2 = task_data
+            print(f"  Массив 1: {arr1}")
+            print(f"  Массив 2: {arr2}")
+        elif task_num == 3:
+            matrix = task_data
+            print(f"  Матрица {len(matrix)}x{len(matrix[0])}:")
+            for row in matrix:
+                print(f"    {row}")
+        elif task_num == 8:
+            arr1, arr2 = task_data
+            print(f"  Массив 1: {arr1}")
+            print(f"  Массив 2: {arr2}")
+
+        print(f"\nРезультат: {result}")
+
+        print("\n1. Вернуться в главное меню")
+        print("2. Выход")
+
+        choice = await self._async_input("\nВыберите: ")
+
+        if choice == "1":
+            return MenuEvent.BACK
+        elif choice == "2":
+            return MenuEvent.EXIT
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_settings(self) -> Optional[MenuEvent]:
+        """Корутина настроек."""
+        print("\n" + "=" * 60)
+        print("НАСТРОЙКИ")
+        print("=" * 60)
+
+        print("\n1. Настройки логирования")
+        print("2. О системе")
         print("3. Назад")
 
-        choice = await asyncio.to_thread(input, "Выберите: ")
+        choice = await self._async_input("\nВыберите: ")
 
-        if choice == '1':
-            rows = 3
-            cols = 3
-            matrix = [[i * cols + j + 1 for j in range(cols)] for i in range(rows)]
-            print("Матрица создана")
-        elif choice == '2':
-            print("Поворот матрицы...")
-            matrix = [[1, 2], [3, 4]]
-            rotated = [[matrix[1][0], matrix[0][0]], [matrix[1][1], matrix[0][1]]]
-            print(f"Повернута: {rotated}")
+        if choice == "1":
+            return MenuEvent.SELECT_MAIN
+        elif choice == "2":
+            await self._show_about()
+            return None
+        elif choice == "3":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_logging_settings(self) -> Optional[MenuEvent]:
+        """Корутина настроек логирования."""
+        print("\n" + "=" * 60)
+        print("НАСТРОЙКИ ЛОГИРОВАНИЯ")
+        print("=" * 60)
+
+        print("\n1. Уровень логирования: INFO")
+        print("2. Уровень логирования: DEBUG")
+        print("3. Уровень логирования: ERROR")
+        print("4. Назад")
+
+        choice = await self._async_input("\nВыберите уровень: ")
+
+        if choice in ["1", "2", "3"]:
+            levels = ["INFO", "DEBUG", "ERROR"]
+            print(f"✓ Установлен уровень: {levels[int(choice)-1]}")
+            await asyncio.sleep(1)
+            return MenuEvent.BACK
+        elif choice == "4":
+            return MenuEvent.BACK
+        else:
+            print("Неверный выбор!")
+            return None
+
+    async def _state_error(self) -> Optional[MenuEvent]:
+        """Корутина состояния ошибки."""
+        error_msg = self.context.get('error_message', 'Неизвестная ошибка')
+
+        print("\n" + "=" * 60)
+        print("ОШИБКА")
+        print("=" * 60)
+
+        print(f"\n{error_msg}")
+
+        print("\n1. Вернуться в главное меню")
+        print("2. Выход")
+
+        choice = await self._async_input("\nВыберите: ")
+
+        if choice == "1":
+            return MenuEvent.BACK
+        elif choice == "2":
+            return MenuEvent.EXIT
+        else:
+            return MenuEvent.EXIT
+
+    async def _state_exit(self) -> Optional[MenuEvent]:
+        """Корутина выхода."""
+        print("\n" + "=" * 60)
+        print("ВЫХОД ИЗ ПРОГРАММЫ")
+        print("=" * 60)
+
+        elapsed = datetime.now() - self.context['start_time']
+        print(f"\nВремя работы: {elapsed.total_seconds():.1f} секунд")
+        print("Спасибо за использование программы!")
+
+        return None
+
+    # ============================================================================
+    # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+    # ============================================================================
+
+    async def _async_input(self, prompt: str) -> str:
+        """Асинхронный ввод с обработкой прерывания."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, input, prompt)
+
+    async def _show_about(self):
+        """Отображение информации о системе."""
+        print("\n" + "=" * 60)
+        print("О СИСТЕМЕ")
+        print("=" * 60)
+
+        print("\nАвтоматное программирование на корутинах")
+        print("Реализация меню через конечный автомат")
+        print("\nСостояния:")
+        for state in MenuState:
+            print(f"  - {state.value}")
+
+        await asyncio.sleep(2)
 
 
-def print_state_machine_diagram():
-    """Вывод графической схемы."""
-    print("\n" + "=" * 70)
-    print("ГРАФИЧЕСКАЯ СХЕМА АВТОМАТА НА КОРУТИНАХ")
-    print("=" * 70)
+# ============================================================================
+# ТЕСТИРОВАНИЕ АВТОМАТА
+# ============================================================================
 
-    diagram = """
-                       ┌─────────────┐
-                       │     IDLE    │
-                       │  (Начало)   │
-                       └──────┬──────┘
-                              │
-                              ▼
-                       ┌─────────────┐
-                       │  MAIN_MENU  │◄─────────────┐
-                       │   (Главное) │              │
-                       └──────┬──────┘              │
-            ┌─────────────────┼─────────────────┐   │
-            │                 │                 │   │
-            ▼                 ▼                 ▼   │
-      ┌──────────┐     ┌──────────┐     ┌──────────┐
-      │ ARRAY_OPS│     │MATRIX_OPS│     │DATA_VALID│
-      │ (Массивы)│     │(Матрицы) │     │(Валидац.)│
-      └────┬─────┘     └────┬─────┘     └────┬─────┘
-           │                 │                 │
-           └─────────────────┼─────────────────┘
-                             │
-            ┌────────────────┼─────────────────┐
-            │                │                 │
-            ▼                ▼                 ▼
-      ┌──────────┐    ┌────────────┐    ┌─────────┐
-      │ALGORITHMS│    │CLIENT_SERVER│   │   EXIT   │
-      │(Алгоритмы)│    │(Клиент-серв)│   │  (Выход) │
-      └──────────┘    └────────────┘    └─────────┘
-    """
+def run_automaton_test():
+    """Запуск теста автоматного программирования."""
+    print("\n" + "=" * 60)
+    print("ТЕСТ АВТОМАТНОГО ПРОГРАММИРОВАНИЯ")
+    print("=" * 60)
 
-    print(diagram)
+    automaton = MenuAutomaton()
+
+    try:
+        # Запускаем корутины
+        asyncio.run(automaton.run())
+
+    except KeyboardInterrupt:
+        print("\n\nПрограмма прервана пользователем")
+    except Exception as e:
+        print(f"\nКритическая ошибка: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def test_state_transitions():
+    """Тест переходов состояний автомата."""
+    print("\n" + "=" * 60)
+    print("ТЕСТ ПЕРЕХОДОВ СОСТОЯНИЙ")
+    print("=" * 60)
+
+    automaton = MenuAutomaton()
+
+    # Тестируем переходы
+    test_cases = [
+        (MenuState.INITIAL, MenuEvent.START, MenuState.MAIN_MENU, "Старт → Главное меню"),
+        (MenuState.MAIN_MENU, MenuEvent.SELECT_TASK, MenuState.TASK_SELECTION, "Главное → Выбор задачи"),
+        (MenuState.TASK_SELECTION, MenuEvent.BACK, MenuState.MAIN_MENU, "Назад из выбора задачи"),
+        (MenuState.MAIN_MENU, MenuEvent.SETTINGS, MenuState.SETTINGS, "Главное → Настройки"),
+        (MenuState.SETTINGS, MenuEvent.BACK, MenuState.MAIN_MENU, "Назад из настроек"),
+        (MenuState.MAIN_MENU, MenuEvent.EXIT, MenuState.EXIT, "Выход"),
+    ]
+
+    print("\nТестирование переходов:")
+    for initial_state, event, expected_state, description in test_cases:
+        automaton.state = initial_state
+        success = automaton.transition(event)
+
+        status = "✓" if success and automaton.state == expected_state else "✗"
+        print(f"  {status} {description}: {initial_state} -> {event} -> {automaton.state}")
+
+    print("\n✓ Тест переходов завершен")
+
+
+async def test_coroutine_flow():
+    """Тест потока корутин."""
+    print("\n" + "=" * 60)
+    print("ТЕСТ ПОТОКА КОРУТИН")
+    print("=" * 60)
+
+    automaton = MenuAutomaton()
+
+    # Тестируем несколько состояний
+    print("\nТестирование корутин состояний:")
+
+    # Начальное состояние
+    automaton.state = MenuState.INITIAL
+    event = await automaton._state_initial()
+    print(f"  INITIAL → {event}")
+
+    # Главное меню (имитируем выбор)
+    automaton.state = MenuState.MAIN_MENU
+    print(f"  MAIN_MENU (корутина запущена)")
+
+    # Состояние ошибки
+    automaton.state = MenuState.ERROR
+    automaton.context['error_message'] = 'Тестовая ошибка'
+    event = await automaton._state_error()
+    print(f"  ERROR → {event}")
+
+    print("\n✓ Тест корутин завершен")
+
+
+def demo_automaton_pattern():
+    """Демонстрация шаблона автоматного программирования."""
+    print("\n" + "=" * 60)
+    print("ДЕМОНСТРАЦИЯ АВТОМАТНОГО ПРОГРАММИРОВАНИЯ")
+    print("=" * 60)
+
+    print("\nШаблон автомата:")
+    print("1. Определение состояний (enum)")
+    print("2. Определение событий (enum)")
+    print("3. Таблица переходов (словарь)")
+    print("4. Корутины для каждого состояния")
+    print("5. Основной цикл автомата")
+
+    print("\nПример таблицы переходов:")
+    automaton = MenuAutomaton()
+    for state, transitions in automaton.transition_table.items():
+        if transitions:
+            print(f"\n{state.value}:")
+            for event, next_state in transitions.items():
+                print(f"  {event.value} → {next_state.value}")
+
+    print("\n✓ Демонстрация завершена")
 
 
 if __name__ == "__main__":
-    print_state_machine_diagram()
+    import argparse
 
-    # Запуск упрощенной версии для теста
-    print("\n" + "=" * 60)
-    print("ЗАПУСК УПРОЩЕННОЙ ВЕРСИИ")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description='Тестирование автоматного программирования')
+    parser.add_argument('--test', choices=['transitions', 'coroutines', 'demo', 'run'],
+                       default='run', help='Тип теста')
 
-    try:
-        menu = SimpleCoroutineMenu()
-        asyncio.run(menu.main_menu())
-    except KeyboardInterrupt:
-        print("\nПрограмма прервана")
+    args = parser.parse_args()
+
+    if args.test == 'transitions':
+        test_state_transitions()
+    elif args.test == 'coroutines':
+        asyncio.run(test_coroutine_flow())
+    elif args.test == 'demo':
+        demo_automaton_pattern()
+    else:
+        run_automaton_test()
